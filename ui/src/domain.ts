@@ -111,7 +111,7 @@ export interface FeatureResult {
 export interface FilterableFeatureResult extends FeatureResult {
   session_id?: string;
   mode?: DiagnosticMode;
-  host_role?: HostRole;
+  host_role?: HostRole | null;
   target?: Target | string;
 }
 
@@ -125,9 +125,9 @@ export interface Session {
   schema_version: '1.1';
   session_id: string;
   mode: DiagnosticMode;
-  host_role: HostRole;
+  host_role: HostRole | null;
   started_at_utc: string;
-  timezone_offset_minutes: number;
+  timezone_offset_minutes: number | null;
   clock_offset_ms: number | null;
   clock_uncertainty_ms: number | null;
   profile: Profile;
@@ -1162,6 +1162,20 @@ export function flattenSessionResults(session: Session): FilterableFeatureResult
   }));
 }
 
+/**
+ * 호스트 역할(client/server/null)의 한국어 표시 라벨을 반환합니다.
+ * null 또는 미지정인 경우 '서버'로 오분류하지 않고 '미확인'을 반환합니다.
+ */
+export function formatHostRoleLabel(role: HostRole | null | undefined): string {
+  if (role === 'client') {
+    return '클라이언트';
+  }
+  if (role === 'server') {
+    return '서버';
+  }
+  return '미확인';
+}
+
 function formatTargetText(target: Target | string | undefined): string {
   if (!target) {
     return '';
@@ -1297,6 +1311,7 @@ export function filterResults<T extends FilterableFeatureResult>(
         item.error_code !== null ? String(item.error_code) : '',
         item.session_id ?? '',
         item.host_role ?? '',
+        formatHostRoleLabel(item.host_role),
         item.mode ?? '',
         formatTargetText(item.target),
         ...item.evidence_ids,
@@ -1401,19 +1416,27 @@ export function migrateLegacySession(raw: unknown): Session {
   const mode: DiagnosticMode =
     rec.mode === 'paired_offline' ? 'paired_offline' : 'standalone';
 
+  const hostRole: HostRole | null =
+    rec.host_role === 'client' || rec.host_role === 'server' ? rec.host_role : null;
+
   const startedAt =
     typeof rec.started_at_utc === 'string' && rec.started_at_utc.trim()
       ? rec.started_at_utc.trim()
       : '1970-01-01T00:00:00Z';
 
+  const timezoneOffsetMinutes: number | null =
+    typeof rec.timezone_offset_minutes === 'number' &&
+    Number.isFinite(rec.timezone_offset_minutes)
+      ? rec.timezone_offset_minutes
+      : null;
+
   return {
     schema_version: '1.1',
     session_id: sessionId,
     mode,
-    host_role: rec.host_role === 'server' ? 'server' : 'client',
+    host_role: hostRole,
     started_at_utc: startedAt,
-    timezone_offset_minutes:
-      typeof rec.timezone_offset_minutes === 'number' ? rec.timezone_offset_minutes : 0,
+    timezone_offset_minutes: timezoneOffsetMinutes,
     clock_offset_ms: null,
     clock_uncertainty_ms: null,
     profile: defaultProfile,

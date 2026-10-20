@@ -6,6 +6,7 @@ import {
   type FeatureStatus,
   filterResults,
   flattenSessionResults,
+  formatHostRoleLabel,
   G1_CONTRACT,
   getFeatureDefinition,
   GROUP_LABELS,
@@ -456,6 +457,7 @@ export function ResultPanel({ showSynthetic, onToggleSynthetic }: ResultPanelPro
                       <span>
                         소요시간: {item.duration_ms !== null ? `${item.duration_ms} ms` : '미실행 (-)'}
                       </span>
+                      <span>호스트 역할: {formatHostRoleLabel(item.host_role)}</span>
                       {item.error_code !== null && <span>오류 코드: {item.error_code}</span>}
                     </div>
                     {item.limitations.length > 0 && (

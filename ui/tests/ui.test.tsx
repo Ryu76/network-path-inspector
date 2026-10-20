@@ -71,6 +71,8 @@ describe('NPI G1 대시보드 React DOM 마운트 및 사용자 상호작용 검
     const pdfBtn = getByTestId<HTMLButtonElement>(container, 'disabled-pdf-btn');
     expect(startBtn.disabled).toBe(true);
     expect(pdfBtn.disabled).toBe(true);
+    expect(pdfBtn.textContent).toContain('PDF 보고서 (G6 미연결 · 비활성)');
+    expect(pdfBtn.textContent).not.toContain('G7');
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 

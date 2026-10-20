@@ -198,7 +198,7 @@ export function App() {
               disabled
               title="G1 단계에서는 PDF/PCAP 보고서 생성기를 제공하지 않습니다."
             >
-              PDF 보고서 (G7 미연결 · 비활성)
+              PDF 보고서 (G6 미연결 · 비활성)
             </button>
             <button
               type="button"

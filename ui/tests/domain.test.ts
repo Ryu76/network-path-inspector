@@ -12,6 +12,7 @@ import {
   type FeatureResult,
   filterResults,
   flattenSessionResults,
+  formatHostRoleLabel,
   G1_CONTRACT,
   getFeatureDefinition,
   getFeatureDisabledInfo,
@@ -375,5 +376,56 @@ describe('NPI G1 도메인 계약 및 상태 순수 함수 검증', () => {
       expect(getFeatureDefinition(feat.feature_id)?.label).toBeTruthy();
     }
     expect(isKnownFeatureId('unknown_fake_feature')).toBe(false);
+  });
+
+  it('27. 레거시 세션 미확인 메타데이터(host_role/timezone_offset_minutes)는 null로 보존되고 알려진 client/server·타임존 값은 유지되며 필터/표시에서 서버로 오분류되지 않는다', () => {
+    const unknownLegacyRaw = {
+      schema_version: '1.0',
+      session_id: 'legacy-unknown-meta',
+    };
+    const migratedUnknown = migrateLegacySession(unknownLegacyRaw);
+    expect(migratedUnknown.host_role).toBeNull();
+    expect(migratedUnknown.timezone_offset_minutes).toBeNull();
+    expect(migratedUnknown.raw_legacy_input).toEqual(unknownLegacyRaw);
+    expect(Object.isFrozen(migratedUnknown.raw_legacy_input)).toBe(true);
+    expect(migratedUnknown.feature_results).toEqual([]);
+    expect(migratedUnknown.evidence).toEqual([]);
+
+    const clientLegacy = migrateLegacySession({
+      schema_version: '1.0',
+      session_id: 'legacy-client',
+      host_role: 'client',
+      timezone_offset_minutes: 540,
+    });
+    expect(clientLegacy.host_role).toBe('client');
+    expect(clientLegacy.timezone_offset_minutes).toBe(540);
+
+    const serverLegacy = migrateLegacySession({
+      schema_version: '1.0',
+      session_id: 'legacy-server',
+      host_role: 'server',
+      timezone_offset_minutes: 0,
+    });
+    expect(serverLegacy.host_role).toBe('server');
+    expect(serverLegacy.timezone_offset_minutes).toBe(0);
+
+    expect(formatHostRoleLabel(null)).toBe('미확인');
+    expect(formatHostRoleLabel(undefined)).toBe('미확인');
+    expect(formatHostRoleLabel('client')).toBe('클라이언트');
+    expect(formatHostRoleLabel('server')).toBe('서버');
+
+    const unknownRoleSession = {
+      ...SYNTHETIC_EXAMPLE_SESSION,
+      host_role: null,
+      timezone_offset_minutes: null,
+    };
+    const flattenedUnknown = flattenSessionResults(unknownRoleSession);
+    expect(flattenedUnknown.every((r) => r.host_role === null)).toBe(true);
+    expect(filterResults(flattenedUnknown, { host_role: 'server' })).toEqual([]);
+    expect(filterResults(flattenedUnknown, { host_role: 'client' })).toEqual([]);
+    expect(filterResults(flattenedUnknown, { search: '서버' })).toEqual([]);
+    expect(filterResults(flattenedUnknown, { search: '미확인' }).length).toBe(
+      flattenedUnknown.length,
+    );
   });
 });
