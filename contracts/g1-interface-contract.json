@@ -1,0 +1,548 @@
+{
+  "contract_version": "g1-1.1.0",
+  "prd_sha256": "faffff45de66126dad6a0a81045dd22b536e9739e78947b426bd42d4a0ef7aa1",
+  "schema_version": "1.1",
+  "groups": [
+    "G-NET",
+    "G-PATH",
+    "G-PKT",
+    "G-PAIR",
+    "G-OPS",
+    "G-EVID"
+  ],
+  "features": [
+    {
+      "feature_id": "tcp_connect",
+      "group_id": "G-NET",
+      "label": "TCP 연결",
+      "description": "TCP 연결 기능",
+      "default_selected": true,
+      "requirements": [],
+      "dependencies": [],
+      "cost_class": "LOW",
+      "permission_level": "USER",
+      "supported_modes": [
+        "standalone",
+        "paired_offline"
+      ]
+    },
+    {
+      "feature_id": "icmp_ping",
+      "group_id": "G-NET",
+      "label": "ICMP Ping",
+      "description": "ICMP Ping 기능",
+      "default_selected": true,
+      "requirements": [],
+      "dependencies": [],
+      "cost_class": "LOW",
+      "permission_level": "USER",
+      "supported_modes": [
+        "standalone",
+        "paired_offline"
+      ]
+    },
+    {
+      "feature_id": "dns_lookup",
+      "group_id": "G-NET",
+      "label": "DNS 조회",
+      "description": "DNS 조회 기능",
+      "default_selected": false,
+      "requirements": [],
+      "dependencies": [],
+      "cost_class": "LOW",
+      "permission_level": "USER",
+      "supported_modes": [
+        "standalone",
+        "paired_offline"
+      ]
+    },
+    {
+      "feature_id": "icmp_traceroute",
+      "group_id": "G-PATH",
+      "label": "ICMP 경로 추적",
+      "description": "ICMP 경로 추적 기능",
+      "default_selected": false,
+      "requirements": [],
+      "dependencies": [],
+      "cost_class": "MEDIUM",
+      "permission_level": "USER",
+      "supported_modes": [
+        "standalone",
+        "paired_offline"
+      ]
+    },
+    {
+      "feature_id": "tcp_traceroute",
+      "group_id": "G-PATH",
+      "label": "TCP 경로 추적",
+      "description": "TCP 경로 추적 기능",
+      "default_selected": false,
+      "requirements": [
+        "validated_tcp_ttl_backend"
+      ],
+      "dependencies": [],
+      "cost_class": "HIGH",
+      "permission_level": "CONDITIONAL",
+      "supported_modes": [
+        "standalone",
+        "paired_offline"
+      ]
+    },
+    {
+      "feature_id": "route_table",
+      "group_id": "G-PATH",
+      "label": "라우팅 테이블",
+      "description": "라우팅 테이블 기능",
+      "default_selected": true,
+      "requirements": [],
+      "dependencies": [],
+      "cost_class": "LOW",
+      "permission_level": "USER",
+      "supported_modes": [
+        "standalone",
+        "paired_offline"
+      ]
+    },
+    {
+      "feature_id": "nic_inventory",
+      "group_id": "G-PATH",
+      "label": "NIC/게이트웨이",
+      "description": "NIC/게이트웨이 기능",
+      "default_selected": true,
+      "requirements": [],
+      "dependencies": [],
+      "cost_class": "LOW",
+      "permission_level": "USER",
+      "supported_modes": [
+        "standalone",
+        "paired_offline"
+      ]
+    },
+    {
+      "feature_id": "packet_capture",
+      "group_id": "G-PKT",
+      "label": "패킷 캡처",
+      "description": "패킷 캡처 기능",
+      "default_selected": false,
+      "requirements": [
+        "capture_consent",
+        "npcap",
+        "capture_privilege"
+      ],
+      "dependencies": [],
+      "cost_class": "HIGH",
+      "permission_level": "CONDITIONAL",
+      "supported_modes": [
+        "standalone",
+        "paired_offline"
+      ]
+    },
+    {
+      "feature_id": "syn_rst_analysis",
+      "group_id": "G-PKT",
+      "label": "SYN/RST 분석",
+      "description": "SYN/RST 분석 기능",
+      "default_selected": false,
+      "requirements": [
+        "packet_evidence"
+      ],
+      "dependencies": [],
+      "cost_class": "MEDIUM",
+      "permission_level": "USER",
+      "supported_modes": [
+        "standalone",
+        "paired_offline"
+      ]
+    },
+    {
+      "feature_id": "firewall_log",
+      "group_id": "G-PKT",
+      "label": "로컬 방화벽 로그",
+      "description": "로컬 방화벽 로그 기능",
+      "default_selected": false,
+      "requirements": [],
+      "dependencies": [],
+      "cost_class": "LOW",
+      "permission_level": "CONDITIONAL",
+      "supported_modes": [
+        "standalone",
+        "paired_offline"
+      ]
+    },
+    {
+      "feature_id": "listening_check",
+      "group_id": "G-PKT",
+      "label": "리스닝 검사",
+      "description": "리스닝 검사 기능",
+      "default_selected": false,
+      "requirements": [],
+      "dependencies": [],
+      "cost_class": "LOW",
+      "permission_level": "USER",
+      "supported_modes": [
+        "standalone",
+        "paired_offline"
+      ]
+    },
+    {
+      "feature_id": "agent_session",
+      "group_id": "G-PAIR",
+      "label": "Agent 세션",
+      "description": "Agent 세션 기능",
+      "default_selected": false,
+      "requirements": [],
+      "dependencies": [],
+      "cost_class": "LOW",
+      "permission_level": "USER",
+      "supported_modes": [
+        "standalone",
+        "paired_offline"
+      ]
+    },
+    {
+      "feature_id": "import_bundle",
+      "group_id": "G-PAIR",
+      "label": "결과 ZIP 가져오기",
+      "description": "결과 ZIP 가져오기 기능",
+      "default_selected": false,
+      "requirements": [],
+      "dependencies": [],
+      "cost_class": "LOW",
+      "permission_level": "USER",
+      "supported_modes": [
+        "standalone",
+        "paired_offline"
+      ]
+    },
+    {
+      "feature_id": "packet_compare",
+      "group_id": "G-PAIR",
+      "label": "패킷 비교",
+      "description": "패킷 비교 기능",
+      "default_selected": false,
+      "requirements": [
+        "packet_evidence"
+      ],
+      "dependencies": [],
+      "cost_class": "MEDIUM",
+      "permission_level": "USER",
+      "supported_modes": [
+        "standalone",
+        "paired_offline"
+      ]
+    },
+    {
+      "feature_id": "clock_skew",
+      "group_id": "G-PAIR",
+      "label": "시계 오차 검사",
+      "description": "시계 오차 검사 기능",
+      "default_selected": false,
+      "requirements": [],
+      "dependencies": [],
+      "cost_class": "LOW",
+      "permission_level": "USER",
+      "supported_modes": [
+        "standalone",
+        "paired_offline"
+      ]
+    },
+    {
+      "feature_id": "tcp_monitor",
+      "group_id": "G-OPS",
+      "label": "반복 TCP",
+      "description": "반복 TCP 기능",
+      "default_selected": false,
+      "requirements": [],
+      "dependencies": [],
+      "cost_class": "LOW",
+      "permission_level": "USER",
+      "supported_modes": [
+        "standalone",
+        "paired_offline"
+      ]
+    },
+    {
+      "feature_id": "config_change",
+      "group_id": "G-OPS",
+      "label": "구성 변경 감지",
+      "description": "구성 변경 감지 기능",
+      "default_selected": false,
+      "requirements": [],
+      "dependencies": [],
+      "cost_class": "LOW",
+      "permission_level": "USER",
+      "supported_modes": [
+        "standalone",
+        "paired_offline"
+      ]
+    },
+    {
+      "feature_id": "history_query",
+      "group_id": "G-OPS",
+      "label": "이력 조회",
+      "description": "이력 조회 기능",
+      "default_selected": false,
+      "requirements": [],
+      "dependencies": [],
+      "cost_class": "LOW",
+      "permission_level": "USER",
+      "supported_modes": [
+        "standalone",
+        "paired_offline"
+      ]
+    },
+    {
+      "feature_id": "result_json",
+      "group_id": "G-EVID",
+      "label": "결과 JSON",
+      "description": "결과 JSON 기능",
+      "default_selected": true,
+      "requirements": [],
+      "dependencies": [],
+      "cost_class": "LOW",
+      "permission_level": "USER",
+      "supported_modes": [
+        "standalone",
+        "paired_offline"
+      ]
+    },
+    {
+      "feature_id": "pdf_report",
+      "group_id": "G-EVID",
+      "label": "PDF 보고서",
+      "description": "PDF 보고서 기능",
+      "default_selected": false,
+      "requirements": [],
+      "dependencies": [],
+      "cost_class": "MEDIUM",
+      "permission_level": "USER",
+      "supported_modes": [
+        "standalone",
+        "paired_offline"
+      ]
+    },
+    {
+      "feature_id": "pcap_export",
+      "group_id": "G-EVID",
+      "label": "PCAP 내보내기",
+      "description": "PCAP 내보내기 기능",
+      "default_selected": false,
+      "requirements": [
+        "packet_evidence"
+      ],
+      "dependencies": [],
+      "cost_class": "LOW",
+      "permission_level": "USER",
+      "supported_modes": [
+        "standalone",
+        "paired_offline"
+      ]
+    },
+    {
+      "feature_id": "hash_verify",
+      "group_id": "G-EVID",
+      "label": "해시 검증",
+      "description": "해시 검증 기능",
+      "default_selected": false,
+      "requirements": [],
+      "dependencies": [],
+      "cost_class": "LOW",
+      "permission_level": "USER",
+      "supported_modes": [
+        "standalone",
+        "paired_offline"
+      ]
+    },
+    {
+      "feature_id": "policy_check",
+      "group_id": "G-EVID",
+      "label": "정책 검증",
+      "description": "정책 검증 기능",
+      "default_selected": false,
+      "requirements": [],
+      "dependencies": [],
+      "cost_class": "LOW",
+      "permission_level": "USER",
+      "supported_modes": [
+        "standalone",
+        "paired_offline"
+      ]
+    }
+  ],
+  "presets": {
+    "quick-default": [
+      "tcp_connect",
+      "icmp_ping",
+      "nic_inventory",
+      "route_table",
+      "result_json"
+    ],
+    "path-default": [
+      "tcp_connect",
+      "icmp_ping",
+      "nic_inventory",
+      "route_table",
+      "icmp_traceroute",
+      "tcp_traceroute",
+      "result_json"
+    ],
+    "precise-default": [
+      "tcp_connect",
+      "icmp_ping",
+      "nic_inventory",
+      "route_table",
+      "icmp_traceroute",
+      "tcp_traceroute",
+      "packet_capture",
+      "syn_rst_analysis",
+      "firewall_log",
+      "listening_check",
+      "result_json"
+    ],
+    "paired-default": [
+      "agent_session",
+      "import_bundle",
+      "packet_compare",
+      "clock_skew",
+      "result_json"
+    ]
+  },
+  "modes": [
+    "standalone",
+    "paired_offline"
+  ],
+  "statuses": [
+    "PASS",
+    "FAIL",
+    "WARN",
+    "SKIPPED_BY_USER",
+    "UNAVAILABLE",
+    "ERROR",
+    "CANCELLED"
+  ],
+  "classifications": [
+    "OBSERVED",
+    "INFERRED",
+    "UNKNOWN"
+  ],
+  "confidence": [
+    "low",
+    "medium",
+    "high"
+  ],
+  "tcp_outcomes": [
+    "CONNECTED",
+    "REFUSED",
+    "TIMED_OUT",
+    "UNREACHABLE",
+    "LOCAL_ERROR",
+    "DNS_ERROR",
+    "CANCELLED"
+  ],
+  "tcp_error_mapping": {
+    "10061": "REFUSED",
+    "10060": "TIMED_OUT",
+    "10051": "UNREACHABLE",
+    "10065": "UNREACHABLE",
+    "10050": "LOCAL_ERROR",
+    "10013": "LOCAL_ERROR",
+    "11001": "DNS_ERROR",
+    "11004": "DNS_ERROR",
+    "10054": "LOCAL_ERROR"
+  },
+  "evidence_kinds": [
+    "SOCKET",
+    "ICMP",
+    "DNS",
+    "HOST_SNAPSHOT",
+    "PACKET",
+    "CAPTURE_METADATA",
+    "POLICY_MEMO",
+    "IMPORT"
+  ],
+  "objects": {
+    "Target": {
+      "host": "nonempty IP/domain string, no URI/path/credentials/CIDR/list; TCP port separate",
+      "port": "integer 1..65535",
+      "protocol": "TCP"
+    },
+    "Limits": {
+      "tcp_timeout_ms": 5000,
+      "max_hops": 30,
+      "retries": 0,
+      "max_concurrent_tcp": 4,
+      "capture_duration_secs": 30,
+      "capture_max_bytes": 52428800,
+      "log_retention_days": 30,
+      "ui_updates_per_second": 4
+    },
+    "Profile": {
+      "schema_version": "1.1",
+      "profile_id": "nonempty string",
+      "label": "string",
+      "mode": "mode enum",
+      "selected_features": "unique known feature_id array",
+      "capture_approved": "boolean false default",
+      "target": "Target",
+      "limits": "Limits"
+    },
+    "Evidence": {
+      "evidence_id": "unique nonempty string",
+      "kind": "evidence kind enum",
+      "artifact_path": "relative safe path or null",
+      "synthetic": "boolean required"
+    },
+    "Finding": {
+      "classification": "classification enum",
+      "statement": "nonempty string",
+      "evidence_ids": "array of existing Evidence IDs; required nonempty for OBSERVED",
+      "confidence": "confidence enum",
+      "limitations": "string[]",
+      "next_checks": "string[]"
+    },
+    "FeatureResult": {
+      "feature_id": "known ID",
+      "group_id": "matching group ID",
+      "status": "status enum",
+      "classification": "classification enum or null",
+      "evidence_ids": "existing evidence ID[]",
+      "started_at_utc": "RFC3339 string or null",
+      "ended_at_utc": "RFC3339 string or null",
+      "duration_ms": "nonnegative integer or null",
+      "error_code": "integer or null",
+      "limitations": "string[]",
+      "next_checks": "string[]"
+    },
+    "Session": {
+      "schema_version": "1.1",
+      "session_id": "UUID string",
+      "mode": "mode enum",
+      "host_role": "client|server",
+      "started_at_utc": "RFC3339 string",
+      "timezone_offset_minutes": "integer -840..840",
+      "clock_offset_ms": "integer or null",
+      "clock_uncertainty_ms": "nonnegative integer or null",
+      "profile": "Profile",
+      "evidence": "Evidence[]",
+      "feature_results": "FeatureResult[]",
+      "findings": "Finding[]",
+      "limitations": "string[]",
+      "resource_metrics": {
+        "peak_rss_bytes": null,
+        "avg_cpu_percent": null,
+        "capture_drops": null
+      }
+    }
+  },
+  "safety_rules": [
+    "G1 validators and planning only, no socket/OS/capture/PDF/monitor side effects.",
+    "Registry default != execution; startup initializes zero optional modules.",
+    "Unselected feature SKIPPED_BY_USER, unavailable dependency/permission UNAVAILABLE; local errors ERROR.",
+    "Prerequisite collectors may be shared once internally, but never execute a deselected diagnostic probe; dependencies must not auto-consent capture.",
+    "Presets cannot grant capture consent. Restore profile strips capture_approved and all HIGH-cost/risky optional selections until reconfirmed.",
+    "SOCKET success/refusal is OS observation only; never assert observed SYN/RST or a blocking device without PACKET/device evidence.",
+    "OBSERVED requires resolvable evidence; synthetic fixture evidence must remain labelled synthetic and never be advertised as measured.",
+    "Legacy1.0 conversion preserves raw input separately, missing fields UNKNOWN/null, no invented PASS/evidence/counters.",
+    "G0 safe dev baseline: x64 current Win10 test host only verified; Win11/Server2016+ support unverified; no Npcap redistribution/install; default masking ON; offline only; unsigned local dev build only."
+  ]
+}

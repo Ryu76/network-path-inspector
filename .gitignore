@@ -1,0 +1,10 @@
+.worktrees/
+.harness/
+target/
+node_modules/
+dist/
+ui/coverage/
+*.local
+.env*
+!/.env.example
+artifacts/
