@@ -1,0 +1,661 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "common-1.1.schema.json",
+  "title": "NPI G1 공통 데이터 정의 스키마 (v1.1)",
+  "description": "Network Path Inspector G1 계약(g1-1.1.0)을 위한 공통 열거형 및 객체 정의",
+  "$defs": {
+    "SchemaVersion": {
+      "type": "string",
+      "const": "1.1",
+      "description": "지원되는 스키마 버전 (1.1 고정)"
+    },
+    "UuidString": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+      "description": "표준 UUID 문자열"
+    },
+    "Rfc3339DateTime": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,9})?(?:Z|[+-](?:[01]\\d|2[0-3]):[0-5]\\d)$",
+      "description": "시간대 오프셋(Z 또는 +/-HH:MM)을 포함한 RFC3339 일시 문자열"
+    },
+    "NonBlankString": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S",
+      "description": "공백이 아닌 문자를 최소 1자 이상 포함하는 문자열"
+    },
+    "IdentifierString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._:-]+$",
+      "description": "공백 없는 안전한 식별자 문자열"
+    },
+    "SafeRelativePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 260,
+      "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?!.*(?:^|[/\\\\])\\.\\.(?:[/\\\\]|$))[A-Za-z0-9._/-]+$",
+      "description": "절대 경로나 상위 디렉토리 참조(..)를 포함하지 않는 안전한 상대 경로"
+    },
+    "HostString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 253,
+      "pattern": "^(?:(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*|(?=.{2,45}$)(?=.*:.*:)[0-9a-fA-F:]+)$",
+      "description": "단일 IPv4, IPv6 또는 도메인 호스트명 (URL, 경로, 자격증명 @, CIDR, 포트, 다중 호스트 금지)"
+    },
+    "GroupId": {
+      "type": "string",
+      "enum": [
+        "G-NET",
+        "G-PATH",
+        "G-PKT",
+        "G-PAIR",
+        "G-OPS",
+        "G-EVID"
+      ],
+      "description": "진단 기능 그룹 식별자"
+    },
+    "FeatureId": {
+      "type": "string",
+      "enum": [
+        "tcp_connect",
+        "icmp_ping",
+        "dns_lookup",
+        "icmp_traceroute",
+        "tcp_traceroute",
+        "route_table",
+        "nic_inventory",
+        "packet_capture",
+        "syn_rst_analysis",
+        "firewall_log",
+        "listening_check",
+        "agent_session",
+        "import_bundle",
+        "packet_compare",
+        "clock_skew",
+        "tcp_monitor",
+        "config_change",
+        "history_query",
+        "result_json",
+        "pdf_report",
+        "pcap_export",
+        "hash_verify",
+        "policy_check"
+      ],
+      "description": "진단 기능 고유 식별자 (계약의 23개 기능)"
+    },
+    "Mode": {
+      "type": "string",
+      "enum": [
+        "standalone",
+        "paired_offline"
+      ],
+      "description": "진단 실행 모드"
+    },
+    "HostRole": {
+      "type": "string",
+      "enum": [
+        "client",
+        "server"
+      ],
+      "description": "진단 수행 호스트 역할"
+    },
+    "Status": {
+      "type": "string",
+      "enum": [
+        "PASS",
+        "FAIL",
+        "WARN",
+        "SKIPPED_BY_USER",
+        "UNAVAILABLE",
+        "ERROR",
+        "CANCELLED"
+      ],
+      "description": "기능 실행 결과 상태 (미실행/불가/오류/취소를 PASS/FAIL로 위장 금지)"
+    },
+    "Classification": {
+      "type": "string",
+      "enum": [
+        "OBSERVED",
+        "INFERRED",
+        "UNKNOWN"
+      ],
+      "description": "근거 수준 분류 (관찰 사실 / 추론 / 확인 불가)"
+    },
+    "Confidence": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "description": "판정 신뢰도 수준"
+    },
+    "TcpOutcome": {
+      "type": "string",
+      "enum": [
+        "CONNECTED",
+        "REFUSED",
+        "TIMED_OUT",
+        "UNREACHABLE",
+        "LOCAL_ERROR",
+        "DNS_ERROR",
+        "CANCELLED"
+      ],
+      "description": "TCP 연결 시도 결과 분류"
+    },
+    "EvidenceKind": {
+      "type": "string",
+      "enum": [
+        "SOCKET",
+        "ICMP",
+        "DNS",
+        "HOST_SNAPSHOT",
+        "PACKET",
+        "CAPTURE_METADATA",
+        "POLICY_MEMO",
+        "IMPORT"
+      ],
+      "description": "증거 자료 종류"
+    },
+    "CostClass": {
+      "type": "string",
+      "enum": [
+        "LOW",
+        "MEDIUM",
+        "HIGH"
+      ],
+      "description": "기능 실행 비용 등급"
+    },
+    "PermissionLevel": {
+      "type": "string",
+      "enum": [
+        "USER",
+        "CONDITIONAL"
+      ],
+      "description": "필요 권한 수준"
+    },
+    "RequirementId": {
+      "type": "string",
+      "enum": [
+        "validated_tcp_ttl_backend",
+        "capture_consent",
+        "npcap",
+        "capture_privilege",
+        "packet_evidence"
+      ],
+      "description": "기능 실행을 위한 선행 요구사항 식별자"
+    },
+    "FeatureGroupMappingGuard": {
+      "description": "기능 ID와 그룹 ID 간의 정확한 계약 매핑 검증",
+      "oneOf": [
+        {
+          "properties": {
+            "group_id": { "const": "G-NET" },
+            "feature_id": {
+              "enum": ["tcp_connect", "icmp_ping", "dns_lookup"]
+            }
+          }
+        },
+        {
+          "properties": {
+            "group_id": { "const": "G-PATH" },
+            "feature_id": {
+              "enum": ["icmp_traceroute", "tcp_traceroute", "route_table", "nic_inventory"]
+            }
+          }
+        },
+        {
+          "properties": {
+            "group_id": { "const": "G-PKT" },
+            "feature_id": {
+              "enum": ["packet_capture", "syn_rst_analysis", "firewall_log", "listening_check"]
+            }
+          }
+        },
+        {
+          "properties": {
+            "group_id": { "const": "G-PAIR" },
+            "feature_id": {
+              "enum": ["agent_session", "import_bundle", "packet_compare", "clock_skew"]
+            }
+          }
+        },
+        {
+          "properties": {
+            "group_id": { "const": "G-OPS" },
+            "feature_id": {
+              "enum": ["tcp_monitor", "config_change", "history_query"]
+            }
+          }
+        },
+        {
+          "properties": {
+            "group_id": { "const": "G-EVID" },
+            "feature_id": {
+              "enum": ["result_json", "pdf_report", "pcap_export", "hash_verify", "policy_check"]
+            }
+          }
+        }
+      ]
+    },
+    "Target": {
+      "type": "object",
+      "description": "진단 대상 목적지 정보",
+      "properties": {
+        "host": {
+          "$ref": "#/$defs/HostString"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "protocol": {
+          "type": "string",
+          "const": "TCP"
+        }
+      },
+      "required": [
+        "host",
+        "port",
+        "protocol"
+      ],
+      "additionalProperties": false
+    },
+    "Limits": {
+      "type": "object",
+      "description": "진단 실행 제한 및 자원 보호 한도",
+      "properties": {
+        "tcp_timeout_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 120000
+        },
+        "max_hops": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "retries": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "max_concurrent_tcp": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4
+        },
+        "capture_duration_secs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 300
+        },
+        "capture_max_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 52428800
+        },
+        "log_retention_days": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 365
+        },
+        "ui_updates_per_second": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4
+        }
+      },
+      "required": [
+        "tcp_timeout_ms",
+        "max_hops",
+        "retries",
+        "max_concurrent_tcp",
+        "capture_duration_secs",
+        "capture_max_bytes",
+        "log_retention_days",
+        "ui_updates_per_second"
+      ],
+      "additionalProperties": false
+    },
+    "Evidence": {
+      "type": "object",
+      "description": "수집되거나 참조된 증거 항목 메타데이터",
+      "properties": {
+        "evidence_id": {
+          "$ref": "#/$defs/IdentifierString"
+        },
+        "kind": {
+          "$ref": "#/$defs/EvidenceKind"
+        },
+        "artifact_path": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SafeRelativePath"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "synthetic": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "evidence_id",
+        "kind",
+        "artifact_path",
+        "synthetic"
+      ],
+      "additionalProperties": false
+    },
+    "Finding": {
+      "type": "object",
+      "description": "관찰·추론·확인 불가가 구분된 진단 판정 항목",
+      "properties": {
+        "classification": {
+          "$ref": "#/$defs/Classification"
+        },
+        "statement": {
+          "$ref": "#/$defs/NonBlankString"
+        },
+        "evidence_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IdentifierString"
+          },
+          "uniqueItems": true
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence"
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NonBlankString"
+          }
+        },
+        "next_checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NonBlankString"
+          }
+        }
+      },
+      "required": [
+        "classification",
+        "statement",
+        "evidence_ids",
+        "confidence",
+        "limitations",
+        "next_checks"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "classification": {
+                "const": "OBSERVED"
+              }
+            },
+            "required": [
+              "classification"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evidence_ids": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "FeatureResult": {
+      "type": "object",
+      "description": "개별 진단 기능 실행 결과",
+      "properties": {
+        "feature_id": {
+          "$ref": "#/$defs/FeatureId"
+        },
+        "group_id": {
+          "$ref": "#/$defs/GroupId"
+        },
+        "status": {
+          "$ref": "#/$defs/Status"
+        },
+        "classification": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Classification"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidence_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IdentifierString"
+          },
+          "uniqueItems": true
+        },
+        "started_at_utc": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Rfc3339DateTime"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ended_at_utc": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Rfc3339DateTime"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "duration_ms": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error_code": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NonBlankString"
+          }
+        },
+        "next_checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NonBlankString"
+          }
+        }
+      },
+      "required": [
+        "feature_id",
+        "group_id",
+        "status",
+        "classification",
+        "evidence_ids",
+        "started_at_utc",
+        "ended_at_utc",
+        "duration_ms",
+        "error_code",
+        "limitations",
+        "next_checks"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "$ref": "#/$defs/FeatureGroupMappingGuard"
+        },
+        {
+          "if": {
+            "properties": {
+              "classification": {
+                "const": "OBSERVED"
+              }
+            },
+            "required": [
+              "classification"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evidence_ids": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ResourceMetrics": {
+      "type": "object",
+      "description": "세션 자원 사용량 측정치 (미측정 시 null)",
+      "properties": {
+        "peak_rss_bytes": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "avg_cpu_percent": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "capture_drops": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "peak_rss_bytes",
+        "avg_cpu_percent",
+        "capture_drops"
+      ],
+      "additionalProperties": false
+    },
+    "FeatureRegistryEntry": {
+      "type": "object",
+      "description": "기능 레지스트리 항목 정의",
+      "properties": {
+        "feature_id": {
+          "$ref": "#/$defs/FeatureId"
+        },
+        "group_id": {
+          "$ref": "#/$defs/GroupId"
+        },
+        "label": {
+          "$ref": "#/$defs/NonBlankString"
+        },
+        "description": {
+          "$ref": "#/$defs/NonBlankString"
+        },
+        "default_selected": {
+          "type": "boolean"
+        },
+        "requirements": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RequirementId"
+          },
+          "uniqueItems": true
+        },
+        "dependencies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FeatureId"
+          },
+          "uniqueItems": true
+        },
+        "cost_class": {
+          "$ref": "#/$defs/CostClass"
+        },
+        "permission_level": {
+          "$ref": "#/$defs/PermissionLevel"
+        },
+        "supported_modes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Mode"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "feature_id",
+        "group_id",
+        "label",
+        "description",
+        "default_selected",
+        "requirements",
+        "dependencies",
+        "cost_class",
+        "permission_level",
+        "supported_modes"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "$ref": "#/$defs/FeatureGroupMappingGuard"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,201 @@
+{
+  "schema_version": "1.1",
+  "session_id": "11111111-1111-4111-8111-111111111105",
+  "mode": "standalone",
+  "host_role": "client",
+  "started_at_utc": "2026-10-20T02:50:00Z",
+  "timezone_offset_minutes": 540,
+  "clock_offset_ms": null,
+  "clock_uncertainty_ms": null,
+  "profile": {
+    "schema_version": "1.1",
+    "profile_id": "precise-capture-unavailable",
+    "label": "정밀 진단 프로파일 (캡처 드라이버 미설치 환경)",
+    "mode": "standalone",
+    "selected_features": [
+      "tcp_connect",
+      "icmp_ping",
+      "nic_inventory",
+      "route_table",
+      "packet_capture",
+      "syn_rst_analysis",
+      "result_json"
+    ],
+    "capture_approved": true,
+    "target": {
+      "host": "192.168.10.100",
+      "port": 1526,
+      "protocol": "TCP"
+    },
+    "limits": {
+      "tcp_timeout_ms": 5000,
+      "max_hops": 30,
+      "retries": 0,
+      "max_concurrent_tcp": 4,
+      "capture_duration_secs": 30,
+      "capture_max_bytes": 52428800,
+      "log_retention_days": 30,
+      "ui_updates_per_second": 4
+    }
+  },
+  "evidence": [
+    {
+      "evidence_id": "ev-socket-005",
+      "kind": "SOCKET",
+      "artifact_path": "artifacts/measurements.jsonl",
+      "synthetic": true
+    },
+    {
+      "evidence_id": "ev-icmp-005",
+      "kind": "ICMP",
+      "artifact_path": "artifacts/measurements.jsonl",
+      "synthetic": true
+    },
+    {
+      "evidence_id": "ev-host-005",
+      "kind": "HOST_SNAPSHOT",
+      "artifact_path": "artifacts/system_snapshot.json",
+      "synthetic": true
+    }
+  ],
+  "feature_results": [
+    {
+      "feature_id": "tcp_connect",
+      "group_id": "G-NET",
+      "status": "FAIL",
+      "classification": "OBSERVED",
+      "evidence_ids": [
+        "ev-socket-005"
+      ],
+      "started_at_utc": "2026-10-20T02:50:01Z",
+      "ended_at_utc": "2026-10-20T02:50:06Z",
+      "duration_ms": 5000,
+      "error_code": 10060,
+      "limitations": [
+        "패킷 캡처 불가 상태로 OS 소켓 타임아웃(10060)만 관찰됨"
+      ],
+      "next_checks": []
+    },
+    {
+      "feature_id": "icmp_ping",
+      "group_id": "G-NET",
+      "status": "PASS",
+      "classification": "OBSERVED",
+      "evidence_ids": [
+        "ev-icmp-005"
+      ],
+      "started_at_utc": "2026-10-20T02:50:06Z",
+      "ended_at_utc": "2026-10-20T02:50:07Z",
+      "duration_ms": 3,
+      "error_code": null,
+      "limitations": [],
+      "next_checks": []
+    },
+    {
+      "feature_id": "nic_inventory",
+      "group_id": "G-PATH",
+      "status": "PASS",
+      "classification": "OBSERVED",
+      "evidence_ids": [
+        "ev-host-005"
+      ],
+      "started_at_utc": "2026-10-20T02:50:00Z",
+      "ended_at_utc": "2026-10-20T02:50:01Z",
+      "duration_ms": 6,
+      "error_code": null,
+      "limitations": [],
+      "next_checks": []
+    },
+    {
+      "feature_id": "route_table",
+      "group_id": "G-PATH",
+      "status": "PASS",
+      "classification": "OBSERVED",
+      "evidence_ids": [
+        "ev-host-005"
+      ],
+      "started_at_utc": "2026-10-20T02:50:00Z",
+      "ended_at_utc": "2026-10-20T02:50:01Z",
+      "duration_ms": 5,
+      "error_code": null,
+      "limitations": [],
+      "next_checks": []
+    },
+    {
+      "feature_id": "packet_capture",
+      "group_id": "G-PKT",
+      "status": "UNAVAILABLE",
+      "classification": null,
+      "evidence_ids": [],
+      "started_at_utc": null,
+      "ended_at_utc": null,
+      "duration_ms": null,
+      "error_code": null,
+      "limitations": [
+        "호스트에 Npcap 드라이버가 설치되어 있지 않고 캡처 권한이 부족하여 패킷 캡처를 실행할 수 없음(UNAVAILABLE)"
+      ],
+      "next_checks": [
+        "조직 정책에 따라 승인된 환경에서만 Npcap 및 권한 확보 후 재시도하거나 기본 소켓/라우팅 진단 결과 활용"
+      ]
+    },
+    {
+      "feature_id": "syn_rst_analysis",
+      "group_id": "G-PKT",
+      "status": "UNAVAILABLE",
+      "classification": null,
+      "evidence_ids": [],
+      "started_at_utc": null,
+      "ended_at_utc": null,
+      "duration_ms": null,
+      "error_code": null,
+      "limitations": [
+        "선행 패킷 캡처(packet_evidence)가 UNAVAILABLE 상태이므로 패킷 플래그 분석을 수행할 수 없음"
+      ],
+      "next_checks": []
+    },
+    {
+      "feature_id": "result_json",
+      "group_id": "G-EVID",
+      "status": "PASS",
+      "classification": "OBSERVED",
+      "evidence_ids": [
+        "ev-socket-005",
+        "ev-icmp-005",
+        "ev-host-005"
+      ],
+      "started_at_utc": "2026-10-20T02:50:07Z",
+      "ended_at_utc": "2026-10-20T02:50:07Z",
+      "duration_ms": 2,
+      "error_code": null,
+      "limitations": [],
+      "next_checks": []
+    }
+  ],
+  "findings": [
+    {
+      "classification": "OBSERVED",
+      "statement": "합성(synthetic) 측정에서 ICMP Ping은 응답했으나 TCP 1526 연결은 타임아웃(10060)으로 실패함.",
+      "evidence_ids": [
+        "ev-socket-005",
+        "ev-icmp-005"
+      ],
+      "confidence": "high",
+      "limitations": [
+        "본 픽스처는 합성(synthetic) 데이터임",
+        "Npcap 미설치로 패킷 캡처 파일은 생성되지 않았으며 위조된 PCAP을 포함하지 않음"
+      ],
+      "next_checks": [
+        "대상 서버 포트 리스닝 상태 및 경로 방화벽 TCP 1526 정책 점검"
+      ]
+    }
+  ],
+  "limitations": [
+    "본 픽스처는 합성(synthetic) 데이터임",
+    "Npcap 미설치 및 권한 부족으로 packet_capture, syn_rst_analysis 기능은 UNAVAILABLE로 기록하고 기본 진단 기능만 수행됨"
+  ],
+  "resource_metrics": {
+    "peak_rss_bytes": null,
+    "avg_cpu_percent": null,
+    "capture_drops": null
+  }
+}

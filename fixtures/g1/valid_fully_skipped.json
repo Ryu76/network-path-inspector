@@ -1,0 +1,105 @@
+{
+  "schema_version": "1.1",
+  "session_id": "11111111-1111-4111-8111-111111111104",
+  "mode": "standalone",
+  "host_role": "client",
+  "started_at_utc": "2026-10-20T02:45:00Z",
+  "timezone_offset_minutes": 540,
+  "clock_offset_ms": null,
+  "clock_uncertainty_ms": null,
+  "profile": {
+    "schema_version": "1.1",
+    "profile_id": "custom-empty",
+    "label": "전체 기능 선택 해제 프로파일",
+    "mode": "standalone",
+    "selected_features": [],
+    "capture_approved": false,
+    "target": {
+      "host": "192.168.10.100",
+      "port": 1526,
+      "protocol": "TCP"
+    },
+    "limits": {
+      "tcp_timeout_ms": 5000,
+      "max_hops": 30,
+      "retries": 0,
+      "max_concurrent_tcp": 4,
+      "capture_duration_secs": 30,
+      "capture_max_bytes": 52428800,
+      "log_retention_days": 30,
+      "ui_updates_per_second": 4
+    }
+  },
+  "evidence": [],
+  "feature_results": [
+    {
+      "feature_id": "tcp_connect",
+      "group_id": "G-NET",
+      "status": "SKIPPED_BY_USER",
+      "classification": null,
+      "evidence_ids": [],
+      "started_at_utc": null,
+      "ended_at_utc": null,
+      "duration_ms": null,
+      "error_code": null,
+      "limitations": [
+        "사용자 미선택으로 실행하지 않음(SKIPPED_BY_USER)"
+      ],
+      "next_checks": [
+        "TCP 연결 확인을 위해 tcp_connect 기능 선택 필요"
+      ]
+    },
+    {
+      "feature_id": "icmp_ping",
+      "group_id": "G-NET",
+      "status": "SKIPPED_BY_USER",
+      "classification": null,
+      "evidence_ids": [],
+      "started_at_utc": null,
+      "ended_at_utc": null,
+      "duration_ms": null,
+      "error_code": null,
+      "limitations": [
+        "사용자 미선택으로 실행하지 않음(SKIPPED_BY_USER)"
+      ],
+      "next_checks": []
+    },
+    {
+      "feature_id": "packet_capture",
+      "group_id": "G-PKT",
+      "status": "SKIPPED_BY_USER",
+      "classification": null,
+      "evidence_ids": [],
+      "started_at_utc": null,
+      "ended_at_utc": null,
+      "duration_ms": null,
+      "error_code": null,
+      "limitations": [
+        "사용자 미선택으로 실행하지 않음(SKIPPED_BY_USER)"
+      ],
+      "next_checks": []
+    }
+  ],
+  "findings": [
+    {
+      "classification": "UNKNOWN",
+      "statement": "사용자가 모든 진단 기능을 선택 해제(SKIPPED_BY_USER)하여 실행된 검사가 없으므로 대상 경로 상태를 판정할 수 없음.",
+      "evidence_ids": [],
+      "confidence": "low",
+      "limitations": [
+        "미실행 기능을 PASS 또는 FAIL로 위장하지 않고 SKIPPED_BY_USER 및 UNKNOWN으로 기록함"
+      ],
+      "next_checks": [
+        "진단 프로파일에서 필요한 기능을 최소 1개 이상 선택 후 재실행"
+      ]
+    }
+  ],
+  "limitations": [
+    "본 픽스처는 합성(synthetic) 테스트 케이스이며 선택된 기능이 없어 프로브가 0회 실행됨"
+  ],
+  "resource_metrics": {
+    "peak_rss_bytes": null,
+    "avg_cpu_percent": null,
+    "capture_drops": null
+  }
+}

@@ -1,0 +1,218 @@
+{
+  "schema_version": "1.1",
+  "session_id": "11111111-1111-4111-8111-111111111103",
+  "mode": "standalone",
+  "host_role": "client",
+  "started_at_utc": "2026-10-20T02:40:00Z",
+  "timezone_offset_minutes": 540,
+  "clock_offset_ms": null,
+  "clock_uncertainty_ms": null,
+  "profile": {
+    "schema_version": "1.1",
+    "profile_id": "path-default",
+    "label": "경로 진단 기본 프로파일",
+    "mode": "standalone",
+    "selected_features": [
+      "tcp_connect",
+      "icmp_ping",
+      "nic_inventory",
+      "route_table",
+      "icmp_traceroute",
+      "tcp_traceroute",
+      "result_json"
+    ],
+    "capture_approved": false,
+    "target": {
+      "host": "192.168.10.100",
+      "port": 1526,
+      "protocol": "TCP"
+    },
+    "limits": {
+      "tcp_timeout_ms": 5000,
+      "max_hops": 30,
+      "retries": 1,
+      "max_concurrent_tcp": 2,
+      "capture_duration_secs": 30,
+      "capture_max_bytes": 52428800,
+      "log_retention_days": 30,
+      "ui_updates_per_second": 4
+    }
+  },
+  "evidence": [
+    {
+      "evidence_id": "ev-socket-timeout-001",
+      "kind": "SOCKET",
+      "artifact_path": "artifacts/measurements.jsonl",
+      "synthetic": true
+    },
+    {
+      "evidence_id": "ev-icmp-trace-001",
+      "kind": "ICMP",
+      "artifact_path": "artifacts/measurements.jsonl",
+      "synthetic": true
+    },
+    {
+      "evidence_id": "ev-host-003",
+      "kind": "HOST_SNAPSHOT",
+      "artifact_path": "artifacts/system_snapshot.json",
+      "synthetic": true
+    }
+  ],
+  "feature_results": [
+    {
+      "feature_id": "tcp_connect",
+      "group_id": "G-NET",
+      "status": "FAIL",
+      "classification": "OBSERVED",
+      "evidence_ids": [
+        "ev-socket-timeout-001"
+      ],
+      "started_at_utc": "2026-10-20T02:40:01Z",
+      "ended_at_utc": "2026-10-20T02:40:06Z",
+      "duration_ms": 5000,
+      "error_code": 10060,
+      "limitations": [
+        "소켓 타임아웃(10060)은 응답 미수신을 의미할 뿐 특정 방화벽 차단을 증명하지 않음"
+      ],
+      "next_checks": [
+        "양방향 진단 또는 경로 장비 세션/Drop 로그 확인"
+      ]
+    },
+    {
+      "feature_id": "icmp_ping",
+      "group_id": "G-NET",
+      "status": "FAIL",
+      "classification": "OBSERVED",
+      "evidence_ids": [
+        "ev-icmp-trace-001"
+      ],
+      "started_at_utc": "2026-10-20T02:40:06Z",
+      "ended_at_utc": "2026-10-20T02:40:08Z",
+      "duration_ms": 2000,
+      "error_code": null,
+      "limitations": [
+        "ICMP Echo 비응답은 ICMP 정책 제한일 수 있으므로 TCP 장애 원인과 동일시할 수 없음"
+      ],
+      "next_checks": []
+    },
+    {
+      "feature_id": "nic_inventory",
+      "group_id": "G-PATH",
+      "status": "PASS",
+      "classification": "OBSERVED",
+      "evidence_ids": [
+        "ev-host-003"
+      ],
+      "started_at_utc": "2026-10-20T02:40:00Z",
+      "ended_at_utc": "2026-10-20T02:40:01Z",
+      "duration_ms": 6,
+      "error_code": null,
+      "limitations": [],
+      "next_checks": []
+    },
+    {
+      "feature_id": "route_table",
+      "group_id": "G-PATH",
+      "status": "PASS",
+      "classification": "OBSERVED",
+      "evidence_ids": [
+        "ev-host-003"
+      ],
+      "started_at_utc": "2026-10-20T02:40:00Z",
+      "ended_at_utc": "2026-10-20T02:40:01Z",
+      "duration_ms": 5,
+      "error_code": null,
+      "limitations": [],
+      "next_checks": []
+    },
+    {
+      "feature_id": "icmp_traceroute",
+      "group_id": "G-PATH",
+      "status": "WARN",
+      "classification": "OBSERVED",
+      "evidence_ids": [
+        "ev-icmp-trace-001"
+      ],
+      "started_at_utc": "2026-10-20T02:40:08Z",
+      "ended_at_utc": "2026-10-20T02:40:15Z",
+      "duration_ms": 7000,
+      "error_code": null,
+      "limitations": [
+        "HOP 2(192.168.20.1)까지 응답 후 HOP 3 이후 비응답이나, 마지막 응답 HOP을 차단 장비로 단정할 수 없음"
+      ],
+      "next_checks": [
+        "HOP 2 이후 구간 라우팅 및 방화벽 정책/세션 로그 확인 요청"
+      ]
+    },
+    {
+      "feature_id": "tcp_traceroute",
+      "group_id": "G-PATH",
+      "status": "UNAVAILABLE",
+      "classification": null,
+      "evidence_ids": [],
+      "started_at_utc": null,
+      "ended_at_utc": null,
+      "duration_ms": null,
+      "error_code": null,
+      "limitations": [
+        "선행 요구사항(validated_tcp_ttl_backend) 미충족으로 실행 불가(UNAVAILABLE)"
+      ],
+      "next_checks": []
+    },
+    {
+      "feature_id": "result_json",
+      "group_id": "G-EVID",
+      "status": "PASS",
+      "classification": "OBSERVED",
+      "evidence_ids": [
+        "ev-socket-timeout-001",
+        "ev-icmp-trace-001",
+        "ev-host-003"
+      ],
+      "started_at_utc": "2026-10-20T02:40:15Z",
+      "ended_at_utc": "2026-10-20T02:40:15Z",
+      "duration_ms": 2,
+      "error_code": null,
+      "limitations": [],
+      "next_checks": []
+    }
+  ],
+  "findings": [
+    {
+      "classification": "OBSERVED",
+      "statement": "합성(synthetic) 소켓 측정에서 대상 192.168.10.100:1526 연결 시도가 5000ms 타임아웃(WSAETIMEDOUT, 코드 10060, TIMED_OUT)으로 실패함.",
+      "evidence_ids": [
+        "ev-socket-timeout-001"
+      ],
+      "confidence": "high",
+      "limitations": [
+        "본 픽스처는 합성(synthetic) 데이터임",
+        "타임아웃만으로 패킷 손실 위치가 요청 경로인지 반환 경로인지 구별할 수 없음"
+      ],
+      "next_checks": [
+        "서버 측 수신 여부 확인을 위한 양방향 오프라인 진단 수행"
+      ]
+    },
+    {
+      "classification": "UNKNOWN",
+      "statement": "ICMP 경로 추적에서 HOP 2 이후 응답이 없으나, 중간 HOP의 ICMP 비응답은 장비 정책일 수 있으므로 마지막 응답 HOP이나 특정 방화벽을 차단 장비로 단정할 수 없으며 실제 차단 지점은 확인 불가(UNKNOWN)임.",
+      "evidence_ids": [],
+      "confidence": "low",
+      "limitations": [
+        "별도 방화벽 Drop 로그 및 양단 패킷 증거 부재"
+      ],
+      "next_checks": [
+        "네트워크/방화벽 담당 부서에 해당 시간대 세션 테이블 및 Drop 로그 조회 요청"
+      ]
+    }
+  ],
+  "limitations": [
+    "본 픽스처는 합성(synthetic) 데이터이며 실제 네트워크 프로브를 수행하지 않았음",
+    "응답 없는 HOP을 차단 지점으로 단정하지 않으며 차단 여부는 UNKNOWN으로 유지함"
+  ],
+  "resource_metrics": {
+    "peak_rss_bytes": null,
+    "avg_cpu_percent": null,
+    "capture_drops": null
+  }
+}

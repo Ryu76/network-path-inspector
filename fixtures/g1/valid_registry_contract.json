@@ -1,0 +1,359 @@
+[
+  {
+    "feature_id": "tcp_connect",
+    "group_id": "G-NET",
+    "label": "TCP 연결",
+    "description": "TCP 연결 기능",
+    "default_selected": true,
+    "requirements": [],
+    "dependencies": [],
+    "cost_class": "LOW",
+    "permission_level": "USER",
+    "supported_modes": [
+      "standalone",
+      "paired_offline"
+    ]
+  },
+  {
+    "feature_id": "icmp_ping",
+    "group_id": "G-NET",
+    "label": "ICMP Ping",
+    "description": "ICMP Ping 기능",
+    "default_selected": true,
+    "requirements": [],
+    "dependencies": [],
+    "cost_class": "LOW",
+    "permission_level": "USER",
+    "supported_modes": [
+      "standalone",
+      "paired_offline"
+    ]
+  },
+  {
+    "feature_id": "dns_lookup",
+    "group_id": "G-NET",
+    "label": "DNS 조회",
+    "description": "DNS 조회 기능",
+    "default_selected": false,
+    "requirements": [],
+    "dependencies": [],
+    "cost_class": "LOW",
+    "permission_level": "USER",
+    "supported_modes": [
+      "standalone",
+      "paired_offline"
+    ]
+  },
+  {
+    "feature_id": "icmp_traceroute",
+    "group_id": "G-PATH",
+    "label": "ICMP 경로 추적",
+    "description": "ICMP 경로 추적 기능",
+    "default_selected": false,
+    "requirements": [],
+    "dependencies": [],
+    "cost_class": "MEDIUM",
+    "permission_level": "USER",
+    "supported_modes": [
+      "standalone",
+      "paired_offline"
+    ]
+  },
+  {
+    "feature_id": "tcp_traceroute",
+    "group_id": "G-PATH",
+    "label": "TCP 경로 추적",
+    "description": "TCP 경로 추적 기능",
+    "default_selected": false,
+    "requirements": [
+      "validated_tcp_ttl_backend"
+    ],
+    "dependencies": [],
+    "cost_class": "HIGH",
+    "permission_level": "CONDITIONAL",
+    "supported_modes": [
+      "standalone",
+      "paired_offline"
+    ]
+  },
+  {
+    "feature_id": "route_table",
+    "group_id": "G-PATH",
+    "label": "라우팅 테이블",
+    "description": "라우팅 테이블 기능",
+    "default_selected": true,
+    "requirements": [],
+    "dependencies": [],
+    "cost_class": "LOW",
+    "permission_level": "USER",
+    "supported_modes": [
+      "standalone",
+      "paired_offline"
+    ]
+  },
+  {
+    "feature_id": "nic_inventory",
+    "group_id": "G-PATH",
+    "label": "NIC/게이트웨이",
+    "description": "NIC/게이트웨이 기능",
+    "default_selected": true,
+    "requirements": [],
+    "dependencies": [],
+    "cost_class": "LOW",
+    "permission_level": "USER",
+    "supported_modes": [
+      "standalone",
+      "paired_offline"
+    ]
+  },
+  {
+    "feature_id": "packet_capture",
+    "group_id": "G-PKT",
+    "label": "패킷 캡처",
+    "description": "패킷 캡처 기능",
+    "default_selected": false,
+    "requirements": [
+      "capture_consent",
+      "npcap",
+      "capture_privilege"
+    ],
+    "dependencies": [],
+    "cost_class": "HIGH",
+    "permission_level": "CONDITIONAL",
+    "supported_modes": [
+      "standalone",
+      "paired_offline"
+    ]
+  },
+  {
+    "feature_id": "syn_rst_analysis",
+    "group_id": "G-PKT",
+    "label": "SYN/RST 분석",
+    "description": "SYN/RST 분석 기능",
+    "default_selected": false,
+    "requirements": [
+      "packet_evidence"
+    ],
+    "dependencies": [],
+    "cost_class": "MEDIUM",
+    "permission_level": "USER",
+    "supported_modes": [
+      "standalone",
+      "paired_offline"
+    ]
+  },
+  {
+    "feature_id": "firewall_log",
+    "group_id": "G-PKT",
+    "label": "로컬 방화벽 로그",
+    "description": "로컬 방화벽 로그 기능",
+    "default_selected": false,
+    "requirements": [],
+    "dependencies": [],
+    "cost_class": "LOW",
+    "permission_level": "CONDITIONAL",
+    "supported_modes": [
+      "standalone",
+      "paired_offline"
+    ]
+  },
+  {
+    "feature_id": "listening_check",
+    "group_id": "G-PKT",
+    "label": "리스닝 검사",
+    "description": "리스닝 검사 기능",
+    "default_selected": false,
+    "requirements": [],
+    "dependencies": [],
+    "cost_class": "LOW",
+    "permission_level": "USER",
+    "supported_modes": [
+      "standalone",
+      "paired_offline"
+    ]
+  },
+  {
+    "feature_id": "agent_session",
+    "group_id": "G-PAIR",
+    "label": "Agent 세션",
+    "description": "Agent 세션 기능",
+    "default_selected": false,
+    "requirements": [],
+    "dependencies": [],
+    "cost_class": "LOW",
+    "permission_level": "USER",
+    "supported_modes": [
+      "standalone",
+      "paired_offline"
+    ]
+  },
+  {
+    "feature_id": "import_bundle",
+    "group_id": "G-PAIR",
+    "label": "결과 ZIP 가져오기",
+    "description": "결과 ZIP 가져오기 기능",
+    "default_selected": false,
+    "requirements": [],
+    "dependencies": [],
+    "cost_class": "LOW",
+    "permission_level": "USER",
+    "supported_modes": [
+      "standalone",
+      "paired_offline"
+    ]
+  },
+  {
+    "feature_id": "packet_compare",
+    "group_id": "G-PAIR",
+    "label": "패킷 비교",
+    "description": "패킷 비교 기능",
+    "default_selected": false,
+    "requirements": [
+      "packet_evidence"
+    ],
+    "dependencies": [],
+    "cost_class": "MEDIUM",
+    "permission_level": "USER",
+    "supported_modes": [
+      "standalone",
+      "paired_offline"
+    ]
+  },
+  {
+    "feature_id": "clock_skew",
+    "group_id": "G-PAIR",
+    "label": "시계 오차 검사",
+    "description": "시계 오차 검사 기능",
+    "default_selected": false,
+    "requirements": [],
+    "dependencies": [],
+    "cost_class": "LOW",
+    "permission_level": "USER",
+    "supported_modes": [
+      "standalone",
+      "paired_offline"
+    ]
+  },
+  {
+    "feature_id": "tcp_monitor",
+    "group_id": "G-OPS",
+    "label": "반복 TCP",
+    "description": "반복 TCP 기능",
+    "default_selected": false,
+    "requirements": [],
+    "dependencies": [],
+    "cost_class": "LOW",
+    "permission_level": "USER",
+    "supported_modes": [
+      "standalone",
+      "paired_offline"
+    ]
+  },
+  {
+    "feature_id": "config_change",
+    "group_id": "G-OPS",
+    "label": "구성 변경 감지",
+    "description": "구성 변경 감지 기능",
+    "default_selected": false,
+    "requirements": [],
+    "dependencies": [],
+    "cost_class": "LOW",
+    "permission_level": "USER",
+    "supported_modes": [
+      "standalone",
+      "paired_offline"
+    ]
+  },
+  {
+    "feature_id": "history_query",
+    "group_id": "G-OPS",
+    "label": "이력 조회",
+    "description": "이력 조회 기능",
+    "default_selected": false,
+    "requirements": [],
+    "dependencies": [],
+    "cost_class": "LOW",
+    "permission_level": "USER",
+    "supported_modes": [
+      "standalone",
+      "paired_offline"
+    ]
+  },
+  {
+    "feature_id": "result_json",
+    "group_id": "G-EVID",
+    "label": "결과 JSON",
+    "description": "결과 JSON 기능",
+    "default_selected": true,
+    "requirements": [],
+    "dependencies": [],
+    "cost_class": "LOW",
+    "permission_level": "USER",
+    "supported_modes": [
+      "standalone",
+      "paired_offline"
+    ]
+  },
+  {
+    "feature_id": "pdf_report",
+    "group_id": "G-EVID",
+    "label": "PDF 보고서",
+    "description": "PDF 보고서 기능",
+    "default_selected": false,
+    "requirements": [],
+    "dependencies": [],
+    "cost_class": "MEDIUM",
+    "permission_level": "USER",
+    "supported_modes": [
+      "standalone",
+      "paired_offline"
+    ]
+  },
+  {
+    "feature_id": "pcap_export",
+    "group_id": "G-EVID",
+    "label": "PCAP 내보내기",
+    "description": "PCAP 내보내기 기능",
+    "default_selected": false,
+    "requirements": [
+      "packet_evidence"
+    ],
+    "dependencies": [],
+    "cost_class": "LOW",
+    "permission_level": "USER",
+    "supported_modes": [
+      "standalone",
+      "paired_offline"
+    ]
+  },
+  {
+    "feature_id": "hash_verify",
+    "group_id": "G-EVID",
+    "label": "해시 검증",
+    "description": "해시 검증 기능",
+    "default_selected": false,
+    "requirements": [],
+    "dependencies": [],
+    "cost_class": "LOW",
+    "permission_level": "USER",
+    "supported_modes": [
+      "standalone",
+      "paired_offline"
+    ]
+  },
+  {
+    "feature_id": "policy_check",
+    "group_id": "G-EVID",
+    "label": "정책 검증",
+    "description": "정책 검증 기능",
+    "default_selected": false,
+    "requirements": [],
+    "dependencies": [],
+    "cost_class": "LOW",
+    "permission_level": "USER",
+    "supported_modes": [
+      "standalone",
+      "paired_offline"
+    ]
+  }
+]
