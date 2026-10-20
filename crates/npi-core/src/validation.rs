@@ -108,6 +108,10 @@ fn is_numeric_label(label: &str) -> bool {
 
 /// 순수 문자열 및 `std::net::IpAddr` 파싱만을 사용하여 대상 호스트를 검증한다.
 /// DNS 조회나 소켓 생성을 절대 수행하지 않는다.
+pub(crate) fn validate_target_host_str(host: &str) -> Result<(), String> {
+    validate_target_host(host)
+}
+
 fn validate_target_host(host: &str) -> Result<(), String> {
     if host.trim().is_empty() {
         return Err("target.host는 비어 있을 수 없습니다".to_string());

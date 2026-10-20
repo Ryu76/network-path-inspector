@@ -1,4 +1,5 @@
 pub mod models;
+pub mod session;
 pub mod validation;
 
 use serde::{Deserialize, Serialize};
@@ -6,6 +7,10 @@ use serde_json::Value;
 
 pub use models::{
     CostClass, ExecutionMode, FeatureDefinition, GroupId, Limits, PermissionLevel, Profile, Target,
+};
+pub use session::{
+    Evidence, FeatureResult, Finding, ResourceMetrics, Session, convert_legacy_session,
+    validate_session,
 };
 pub use validation::{validate_profile, validate_registry};
 
