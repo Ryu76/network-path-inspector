@@ -4,7 +4,7 @@ ROOT=pathlib.Path(__file__).resolve().parents[1]
 p=argparse.ArgumentParser();p.add_argument('stage',nargs='?',default='g01');args=p.parse_args()
 ALLOWED={'read_file','view_file','write_file','write_to_file','edit_file','replace_file_content','multi_replace_file_content','multi_edit','list_dir','list_directory','find_by_name','grep_search','finish'}
 WRITES={'write_file','write_to_file','edit_file','replace_file_content','multi_replace_file_content','multi_edit'}
-RULES={'architecture':('docs/',),'core':('crates/npi-core/',),'schema':('schemas/','fixtures/','tests/schema/','tools/validate_schema.py'),'ui':('ui/',),'planner':('crates/npi-core/src/planning.rs','crates/npi-core/tests/planning.rs','crates/npi-core/src/lib.rs',)}
+RULES={'g2tcp':('crates/npi-probes/src/tcp.rs','crates/npi-probes/tests/tcp.rs'),'g2icmp':('crates/npi-probes/src/icmp.rs','crates/npi-probes/tests/icmp.rs'),'g2host':('crates/npi-probes/src/host.rs','crates/npi-probes/tests/host.rs'),'g2engine':('crates/npi-probes/src/engine.rs','crates/npi-probes/src/main.rs','crates/npi-probes/tests/engine.rs'),'architecture':('docs/',),'core':('crates/npi-core/',),'schema':('schemas/','fixtures/','tests/schema/','tools/validate_schema.py'),'ui':('ui/',),'planner':('crates/npi-core/src/planning.rs','crates/npi-core/tests/planning.rs','crates/npi-core/src/lib.rs',)}
 def under(path,root):
  try:path.resolve().relative_to(root.resolve());return True
  except ValueError:return False
