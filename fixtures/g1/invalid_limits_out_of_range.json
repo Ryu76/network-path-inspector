@@ -1,0 +1,25 @@
+{
+  "schema_version": "1.1",
+  "profile_id": "invalid-limits-profile",
+  "label": "제한 수치 범위 초과 프로파일",
+  "mode": "standalone",
+  "selected_features": [
+    "tcp_connect"
+  ],
+  "capture_approved": false,
+  "target": {
+    "host": "192.168.10.100",
+    "port": 1526,
+    "protocol": "TCP"
+  },
+  "limits": {
+    "tcp_timeout_ms": 200000,
+    "max_hops": 128,
+    "retries": 10,
+    "max_concurrent_tcp": 16,
+    "capture_duration_secs": 600,
+    "capture_max_bytes": 999999999,
+    "log_retention_days": 730,
+    "ui_updates_per_second": 10
+  }
+}

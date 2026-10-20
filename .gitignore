@@ -8,3 +8,8 @@ ui/coverage/
 .env*
 !/.env.example
 artifacts/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+release/

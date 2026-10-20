@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "profile-1.1.schema.json",
+  "title": "NPI G1 진단 프로파일 스키마 (v1.1)",
+  "description": "Network Path Inspector 선택형 진단 프로파일(Profile) 계약 스키마",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "$ref": "common-1.1.schema.json#/$defs/SchemaVersion"
+    },
+    "profile_id": {
+      "$ref": "common-1.1.schema.json#/$defs/IdentifierString"
+    },
+    "label": {
+      "$ref": "common-1.1.schema.json#/$defs/NonBlankString"
+    },
+    "mode": {
+      "$ref": "common-1.1.schema.json#/$defs/Mode"
+    },
+    "selected_features": {
+      "type": "array",
+      "items": {
+        "$ref": "common-1.1.schema.json#/$defs/FeatureId"
+      },
+      "uniqueItems": true
+    },
+    "capture_approved": {
+      "type": "boolean",
+      "default": false
+    },
+    "target": {
+      "$ref": "common-1.1.schema.json#/$defs/Target"
+    },
+    "limits": {
+      "$ref": "common-1.1.schema.json#/$defs/Limits"
+    }
+  },
+  "required": [
+    "schema_version",
+    "profile_id",
+    "label",
+    "mode",
+    "selected_features",
+    "capture_approved",
+    "target",
+    "limits"
+  ],
+  "additionalProperties": false
+}

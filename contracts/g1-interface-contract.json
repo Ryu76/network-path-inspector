@@ -1,5 +1,5 @@
 {
-  "contract_version": "g1-1.1.0",
+  "contract_version": "g1-1.1.2",
   "prd_sha256": "faffff45de66126dad6a0a81045dd22b536e9739e78947b426bd42d4a0ef7aa1",
   "schema_version": "1.1",
   "groups": [
@@ -433,6 +433,7 @@
   "tcp_outcomes": [
     "CONNECTED",
     "REFUSED",
+    "RESET",
     "TIMED_OUT",
     "UNREACHABLE",
     "LOCAL_ERROR",
@@ -448,7 +449,9 @@
     "10013": "LOCAL_ERROR",
     "11001": "DNS_ERROR",
     "11004": "DNS_ERROR",
-    "10054": "LOCAL_ERROR"
+    "10054": "RESET",
+    "11002": "DNS_ERROR",
+    "11003": "DNS_ERROR"
   },
   "evidence_kinds": [
     "SOCKET",
@@ -517,9 +520,9 @@
       "schema_version": "1.1",
       "session_id": "UUID string",
       "mode": "mode enum",
-      "host_role": "client|server",
+      "host_role": "client|server|null; null when legacy source role is unknown",
       "started_at_utc": "RFC3339 string",
-      "timezone_offset_minutes": "integer -840..840",
+      "timezone_offset_minutes": "integer -840..840 or null; source host timezone unknown must remain null",
       "clock_offset_ms": "integer or null",
       "clock_uncertainty_ms": "nonnegative integer or null",
       "profile": "Profile",

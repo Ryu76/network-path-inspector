@@ -1,0 +1,180 @@
+{
+  "schema_version": "1.1",
+  "session_id": "11111111-1111-4111-8111-111111111106",
+  "mode": "paired_offline",
+  "host_role": "client",
+  "started_at_utc": "2026-10-20T03:00:00Z",
+  "timezone_offset_minutes": 540,
+  "clock_offset_ms": null,
+  "clock_uncertainty_ms": null,
+  "profile": {
+    "schema_version": "1.1",
+    "profile_id": "paired-default",
+    "label": "양방향 오프라인 비교 프로파일 (NAT 및 시계 오차 미확인)",
+    "mode": "paired_offline",
+    "selected_features": [
+      "agent_session",
+      "import_bundle",
+      "packet_compare",
+      "clock_skew",
+      "result_json"
+    ],
+    "capture_approved": true,
+    "target": {
+      "host": "192.168.10.100",
+      "port": 1526,
+      "protocol": "TCP"
+    },
+    "limits": {
+      "tcp_timeout_ms": 5000,
+      "max_hops": 30,
+      "retries": 0,
+      "max_concurrent_tcp": 4,
+      "capture_duration_secs": 30,
+      "capture_max_bytes": 52428800,
+      "log_retention_days": 30,
+      "ui_updates_per_second": 4
+    }
+  },
+  "evidence": [
+    {
+      "evidence_id": "ev-import-server-001",
+      "kind": "IMPORT",
+      "artifact_path": "artifacts/server_bundle_manifest.json",
+      "synthetic": true
+    },
+    {
+      "evidence_id": "ev-pkt-json-001",
+      "kind": "PACKET",
+      "artifact_path": "artifacts/synthetic_packet_pair_summary.json",
+      "synthetic": true
+    }
+  ],
+  "feature_results": [
+    {
+      "feature_id": "agent_session",
+      "group_id": "G-PAIR",
+      "status": "PASS",
+      "classification": "OBSERVED",
+      "evidence_ids": [
+        "ev-import-server-001"
+      ],
+      "started_at_utc": "2026-10-20T03:00:00Z",
+      "ended_at_utc": "2026-10-20T03:00:01Z",
+      "duration_ms": 10,
+      "error_code": null,
+      "limitations": [],
+      "next_checks": []
+    },
+    {
+      "feature_id": "import_bundle",
+      "group_id": "G-PAIR",
+      "status": "PASS",
+      "classification": "OBSERVED",
+      "evidence_ids": [
+        "ev-import-server-001"
+      ],
+      "started_at_utc": "2026-10-20T03:00:01Z",
+      "ended_at_utc": "2026-10-20T03:00:02Z",
+      "duration_ms": 25,
+      "error_code": null,
+      "limitations": [
+        "가져온 서버 번들 데이터는 재현성 시험용 합성(synthetic) JSON 요약임"
+      ],
+      "next_checks": []
+    },
+    {
+      "feature_id": "packet_compare",
+      "group_id": "G-PAIR",
+      "status": "WARN",
+      "classification": "INFERRED",
+      "evidence_ids": [
+        "ev-pkt-json-001",
+        "ev-import-server-001"
+      ],
+      "started_at_utc": "2026-10-20T03:00:02Z",
+      "ended_at_utc": "2026-10-20T03:00:03Z",
+      "duration_ms": 18,
+      "error_code": null,
+      "limitations": [
+        "합성(synthetic) JSON 패킷 요약 비교에서 출발지 IP/포트 5-tuple이 변환되어 매칭 불확실 상태임",
+        "실제 PCAP 바이너리가 아닌 합성 JSON 증거(synthetic=true) 기반임"
+      ],
+      "next_checks": [
+        "경로상 NAT 장비의 세션 변환 테이블 확인"
+      ]
+    },
+    {
+      "feature_id": "clock_skew",
+      "group_id": "G-PAIR",
+      "status": "UNAVAILABLE",
+      "classification": "UNKNOWN",
+      "evidence_ids": [],
+      "started_at_utc": null,
+      "ended_at_utc": null,
+      "duration_ms": null,
+      "error_code": null,
+      "limitations": [
+        "양측 호스트의 기준 시간 동기화 정보가 없어 시계 오차를 계산할 수 없으며 0으로 위조하지 않고 null로 유지함"
+      ],
+      "next_checks": [
+        "양측 호스트의 NTP 동기화 상태 점검 후 재수집"
+      ]
+    },
+    {
+      "feature_id": "result_json",
+      "group_id": "G-EVID",
+      "status": "PASS",
+      "classification": "OBSERVED",
+      "evidence_ids": [
+        "ev-import-server-001",
+        "ev-pkt-json-001"
+      ],
+      "started_at_utc": "2026-10-20T03:00:03Z",
+      "ended_at_utc": "2026-10-20T03:00:03Z",
+      "duration_ms": 2,
+      "error_code": null,
+      "limitations": [],
+      "next_checks": []
+    }
+  ],
+  "findings": [
+    {
+      "classification": "INFERRED",
+      "statement": "합성(synthetic) 양방향 JSON 패킷 증거 비교 시 클라이언트 송신 5-tuple과 서버 수신 후보 이벤트의 출발지 주소가 달라 NAT 또는 프록시 개입 가능성이 추론됨(매칭 불확실).",
+      "evidence_ids": [
+        "ev-pkt-json-001",
+        "ev-import-server-001"
+      ],
+      "confidence": "low",
+      "limitations": [
+        "본 픽스처의 PACKET 증거는 실제 PCAP 파일이 아닌 합성(synthetic=true) JSON 데이터임",
+        "5-tuple 불일치와 시계 오차 미확인으로 인해 동일 연결 시도임을 확정하지 않음"
+      ],
+      "next_checks": [
+        "중간 NAT/방화벽 장비의 주소 변환 로그 및 TCP 시퀀스 번호 대조"
+      ]
+    },
+    {
+      "classification": "UNKNOWN",
+      "statement": "양측 호스트의 시계 오차(clock_offset_ms)와 불확실성(clock_uncertainty_ms)을 확인할 수 없어(null) 타임스탬프 기반 정밀 순서는 확인 불가(UNKNOWN)임.",
+      "evidence_ids": [],
+      "confidence": "low",
+      "limitations": [
+        "미확인 시계 오차를 0ms로 가정하거나 위조하지 않음"
+      ],
+      "next_checks": [
+        "양측 시스템 시간 동기화(w32tm /stripchart 등 운영 승인 절차) 상태 확인"
+      ]
+    }
+  ],
+  "limitations": [
+    "본 픽스처는 합성(synthetic) JSON 증거만을 사용하며 실제 네트워크 캡처나 PCAP 파일 생성을 수행하지 않았음",
+    "시계 오차 미확인 상태이므로 clock_offset_ms 및 clock_uncertainty_ms를 null로 유지함"
+  ],
+  "resource_metrics": {
+    "peak_rss_bytes": null,
+    "avg_cpu_percent": null,
+    "capture_drops": null
+  }
+}

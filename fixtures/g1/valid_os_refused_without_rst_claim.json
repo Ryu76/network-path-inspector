@@ -1,0 +1,197 @@
+{
+  "schema_version": "1.1",
+  "session_id": "11111111-1111-4111-8111-111111111102",
+  "mode": "standalone",
+  "host_role": "client",
+  "started_at_utc": "2026-10-20T02:35:00Z",
+  "timezone_offset_minutes": 540,
+  "clock_offset_ms": null,
+  "clock_uncertainty_ms": null,
+  "profile": {
+    "schema_version": "1.1",
+    "profile_id": "quick-default",
+    "label": "OS 연결 거부(캡처 미실행) 프로파일",
+    "mode": "standalone",
+    "selected_features": [
+      "tcp_connect",
+      "icmp_ping",
+      "nic_inventory",
+      "route_table",
+      "result_json"
+    ],
+    "capture_approved": false,
+    "target": {
+      "host": "192.168.10.100",
+      "port": 1526,
+      "protocol": "TCP"
+    },
+    "limits": {
+      "tcp_timeout_ms": 5000,
+      "max_hops": 30,
+      "retries": 0,
+      "max_concurrent_tcp": 4,
+      "capture_duration_secs": 30,
+      "capture_max_bytes": 52428800,
+      "log_retention_days": 30,
+      "ui_updates_per_second": 4
+    }
+  },
+  "evidence": [
+    {
+      "evidence_id": "ev-socket-refused-001",
+      "kind": "SOCKET",
+      "artifact_path": "artifacts/measurements.jsonl",
+      "synthetic": true
+    },
+    {
+      "evidence_id": "ev-icmp-002",
+      "kind": "ICMP",
+      "artifact_path": "artifacts/measurements.jsonl",
+      "synthetic": true
+    },
+    {
+      "evidence_id": "ev-host-002",
+      "kind": "HOST_SNAPSHOT",
+      "artifact_path": "artifacts/system_snapshot.json",
+      "synthetic": true
+    }
+  ],
+  "feature_results": [
+    {
+      "feature_id": "tcp_connect",
+      "group_id": "G-NET",
+      "status": "FAIL",
+      "classification": "OBSERVED",
+      "evidence_ids": [
+        "ev-socket-refused-001"
+      ],
+      "started_at_utc": "2026-10-20T02:35:01Z",
+      "ended_at_utc": "2026-10-20T02:35:01Z",
+      "duration_ms": 15,
+      "error_code": 10061,
+      "limitations": [
+        "OS 소켓 계층에서 WSAECONNREFUSED(10061)만 확인되었으며 패킷 캡처 미실행으로 원시 패킷은 미수집됨"
+      ],
+      "next_checks": [
+        "대상 서버의 포트 1526 LISTENING 여부 확인",
+        "응답 생성 주체 확인이 필요한 경우 패킷 캡처 기능을 활성화하여 재점검"
+      ]
+    },
+    {
+      "feature_id": "icmp_ping",
+      "group_id": "G-NET",
+      "status": "PASS",
+      "classification": "OBSERVED",
+      "evidence_ids": [
+        "ev-icmp-002"
+      ],
+      "started_at_utc": "2026-10-20T02:35:01Z",
+      "ended_at_utc": "2026-10-20T02:35:02Z",
+      "duration_ms": 3,
+      "error_code": null,
+      "limitations": [],
+      "next_checks": []
+    },
+    {
+      "feature_id": "nic_inventory",
+      "group_id": "G-PATH",
+      "status": "PASS",
+      "classification": "OBSERVED",
+      "evidence_ids": [
+        "ev-host-002"
+      ],
+      "started_at_utc": "2026-10-20T02:35:00Z",
+      "ended_at_utc": "2026-10-20T02:35:01Z",
+      "duration_ms": 7,
+      "error_code": null,
+      "limitations": [],
+      "next_checks": []
+    },
+    {
+      "feature_id": "route_table",
+      "group_id": "G-PATH",
+      "status": "PASS",
+      "classification": "OBSERVED",
+      "evidence_ids": [
+        "ev-host-002"
+      ],
+      "started_at_utc": "2026-10-20T02:35:00Z",
+      "ended_at_utc": "2026-10-20T02:35:01Z",
+      "duration_ms": 5,
+      "error_code": null,
+      "limitations": [],
+      "next_checks": []
+    },
+    {
+      "feature_id": "packet_capture",
+      "group_id": "G-PKT",
+      "status": "SKIPPED_BY_USER",
+      "classification": null,
+      "evidence_ids": [],
+      "started_at_utc": null,
+      "ended_at_utc": null,
+      "duration_ms": null,
+      "error_code": null,
+      "limitations": [
+        "사용자가 패킷 캡처 기능을 선택하지 않음(SKIPPED_BY_USER)"
+      ],
+      "next_checks": [
+        "원시 패킷 수준 증거가 필요한 경우 사용자 승인 후 packet_capture 선택"
+      ]
+    },
+    {
+      "feature_id": "result_json",
+      "group_id": "G-EVID",
+      "status": "PASS",
+      "classification": "OBSERVED",
+      "evidence_ids": [
+        "ev-socket-refused-001",
+        "ev-icmp-002",
+        "ev-host-002"
+      ],
+      "started_at_utc": "2026-10-20T02:35:02Z",
+      "ended_at_utc": "2026-10-20T02:35:02Z",
+      "duration_ms": 2,
+      "error_code": null,
+      "limitations": [],
+      "next_checks": []
+    }
+  ],
+  "findings": [
+    {
+      "classification": "OBSERVED",
+      "statement": "합성(synthetic) OS 소켓 API 호출에서 연결 거부(WSAECONNREFUSED, 오류코드 10061, REFUSED)가 반환됨.",
+      "evidence_ids": [
+        "ev-socket-refused-001"
+      ],
+      "confidence": "high",
+      "limitations": [
+        "본 픽스처는 합성(synthetic) 데이터이며 패킷 캡처(PACKET 증거)가 없으므로 원시 패킷을 직접 관찰했다고 주장하지 않음"
+      ],
+      "next_checks": [
+        "대상 서버에서 포트 1526 리스닝 상태(listening_check) 확인"
+      ]
+    },
+    {
+      "classification": "UNKNOWN",
+      "statement": "패킷 캡처가 실행되지 않아 실제 네트워크 구간의 거부 패킷 상세 헤더 및 응답 생성 주체(대상 서버 OS 또는 중간 보안 장비)는 확인 불가.",
+      "evidence_ids": [],
+      "confidence": "low",
+      "limitations": [
+        "소켓 오류코드 10061만으로는 응답 패킷을 생성한 장비가 목적지 서버인지 중간 장비인지 특정할 수 없음"
+      ],
+      "next_checks": [
+        "양방향 패킷 캡처 및 서버 측 로컬 리스닝 검사를 통해 응답 발생 지점 대조"
+      ]
+    }
+  ],
+  "limitations": [
+    "본 픽스처는 합성(synthetic) 데이터이며 실제 네트워크 프로브를 실행하지 않았음",
+    "패킷 캡처 미실행(SKIPPED_BY_USER) 상태로 원시 패킷 관찰을 단정하지 않음"
+  ],
+  "resource_metrics": {
+    "peak_rss_bytes": null,
+    "avg_cpu_percent": null,
+    "capture_drops": null
+  }
+}

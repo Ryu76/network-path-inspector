@@ -1,0 +1,29 @@
+{
+  "schema_version": "1.1",
+  "profile_id": "quick-default",
+  "label": "빠른 진단 기본 프로파일",
+  "mode": "standalone",
+  "selected_features": [
+    "tcp_connect",
+    "icmp_ping",
+    "nic_inventory",
+    "route_table",
+    "result_json"
+  ],
+  "capture_approved": false,
+  "target": {
+    "host": "db-internal.corp.example",
+    "port": 1526,
+    "protocol": "TCP"
+  },
+  "limits": {
+    "tcp_timeout_ms": 5000,
+    "max_hops": 30,
+    "retries": 0,
+    "max_concurrent_tcp": 4,
+    "capture_duration_secs": 30,
+    "capture_max_bytes": 52428800,
+    "log_retention_days": 30,
+    "ui_updates_per_second": 4
+  }
+}

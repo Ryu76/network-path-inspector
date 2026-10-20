@@ -1,0 +1,70 @@
+{
+  "schema_version": "1.1",
+  "session_id": "11111111-1111-4111-8111-111111111109",
+  "mode": "standalone",
+  "host_role": null,
+  "started_at_utc": "2026-10-20T02:30:00Z",
+  "timezone_offset_minutes": null,
+  "clock_offset_ms": null,
+  "clock_uncertainty_ms": null,
+  "profile": {
+    "schema_version": "1.1",
+    "profile_id": "legacy-1.0-imported",
+    "label": "레거시 1.0 가져오기 프로파일",
+    "mode": "standalone",
+    "selected_features": [],
+    "capture_approved": false,
+    "target": {
+      "host": "192.168.10.100",
+      "port": 1526,
+      "protocol": "TCP"
+    },
+    "limits": {
+      "tcp_timeout_ms": 5000,
+      "max_hops": 30,
+      "retries": 0,
+      "max_concurrent_tcp": 4,
+      "capture_duration_secs": 30,
+      "capture_max_bytes": 52428800,
+      "log_retention_days": 30,
+      "ui_updates_per_second": 4
+    }
+  },
+  "evidence": [
+    {
+      "evidence_id": "ev-legacy-import-001",
+      "kind": "IMPORT",
+      "artifact_path": "fixtures/g1/legacy_session_1_0_raw.json",
+      "synthetic": true
+    }
+  ],
+  "feature_results": [],
+  "findings": [
+    {
+      "classification": "UNKNOWN",
+      "statement": "구버전(schema_version 1.0) 세션 메타데이터를 가져왔으나 세부 기능 실행 결과 및 패킷/소켓 측정 증거가 원본에 포함되지 않아 연결 상태는 확인 불가(UNKNOWN)로 보존됨.",
+      "evidence_ids": [
+        "ev-legacy-import-001"
+      ],
+      "confidence": "low",
+      "limitations": [
+        "원본 1.0 데이터에 timezone_offset_minutes, clock_offset_ms, clock_uncertainty_ms, feature_results, resource_metrics 필드가 누락되어 null 또는 UNKNOWN으로 변환됨",
+        "원본에 없는 PASS 측정치나 패킷 캡처 증거를 임의 생성하지 않음"
+      ],
+      "next_checks": [
+        "v1.1 진단 엔진으로 대상 호스트에 대한 기본 연결 진단을 재실행하여 최신 증거 확보 권장"
+      ]
+    }
+  ],
+  "limitations": [
+    "schema_version 1.0 원본에서 호환 변환된 세션으로, 원본(fixtures/g1/legacy_session_1_0_raw.json)은 별도 보존됨",
+    "원본 1.0 포맷에 존재하지 않는 시계 오차 및 자원 측정치 필드는 null로 유지하며 미확인 판정은 UNKNOWN으로 기록함",
+    "본 픽스처는 재현성 검증용 합성(synthetic) 데이터임",
+    "원본 로컬 시간대와 호스트 역할은 제공되지 않아 null로 보존함. UTC 0 또는 client로 추측하지 않음."
+  ],
+  "resource_metrics": {
+    "peak_rss_bytes": null,
+    "avg_cpu_percent": null,
+    "capture_drops": null
+  }
+}

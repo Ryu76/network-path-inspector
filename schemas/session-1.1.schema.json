@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "session-1.1.schema.json",
+  "title": "NPI G1 진단 세션 스키마 (v1.1)",
+  "description": "Network Path Inspector 진단 세션(Session) 결과 및 증거 계약 스키마",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "$ref": "common-1.1.schema.json#/$defs/SchemaVersion"
+    },
+    "session_id": {
+      "$ref": "common-1.1.schema.json#/$defs/UuidString"
+    },
+    "mode": {
+      "$ref": "common-1.1.schema.json#/$defs/Mode"
+    },
+    "host_role": {
+      "$ref": "common-1.1.schema.json#/$defs/HostRole"
+    },
+    "started_at_utc": {
+      "$ref": "common-1.1.schema.json#/$defs/Rfc3339DateTime"
+    },
+    "timezone_offset_minutes": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": -840,
+      "maximum": 840
+    },
+    "clock_offset_ms": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "clock_uncertainty_ms": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "profile": {
+      "$ref": "profile-1.1.schema.json"
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "$ref": "common-1.1.schema.json#/$defs/Evidence"
+      }
+    },
+    "feature_results": {
+      "type": "array",
+      "items": {
+        "$ref": "common-1.1.schema.json#/$defs/FeatureResult"
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "$ref": "common-1.1.schema.json#/$defs/Finding"
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "$ref": "common-1.1.schema.json#/$defs/NonBlankString"
+      }
+    },
+    "resource_metrics": {
+      "$ref": "common-1.1.schema.json#/$defs/ResourceMetrics"
+    }
+  },
+  "required": [
+    "schema_version",
+    "session_id",
+    "mode",
+    "host_role",
+    "started_at_utc",
+    "timezone_offset_minutes",
+    "clock_offset_ms",
+    "clock_uncertainty_ms",
+    "profile",
+    "evidence",
+    "feature_results",
+    "findings",
+    "limitations",
+    "resource_metrics"
+  ],
+  "additionalProperties": false
+}

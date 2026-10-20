@@ -1,0 +1,163 @@
+{
+  "schema_version": "1.1",
+  "session_id": "11111111-1111-4111-8111-111111111107",
+  "mode": "standalone",
+  "host_role": "client",
+  "started_at_utc": "2026-10-20T03:05:00Z",
+  "timezone_offset_minutes": 540,
+  "clock_offset_ms": null,
+  "clock_uncertainty_ms": null,
+  "profile": {
+    "schema_version": "1.1",
+    "profile_id": "ipv6-standalone",
+    "label": "IPv6 단독 진단 프로파일",
+    "mode": "standalone",
+    "selected_features": [
+      "tcp_connect",
+      "icmp_ping",
+      "nic_inventory",
+      "route_table",
+      "result_json"
+    ],
+    "capture_approved": false,
+    "target": {
+      "host": "2001:db8:10::100",
+      "port": 1526,
+      "protocol": "TCP"
+    },
+    "limits": {
+      "tcp_timeout_ms": 5000,
+      "max_hops": 30,
+      "retries": 0,
+      "max_concurrent_tcp": 4,
+      "capture_duration_secs": 30,
+      "capture_max_bytes": 52428800,
+      "log_retention_days": 30,
+      "ui_updates_per_second": 4
+    }
+  },
+  "evidence": [
+    {
+      "evidence_id": "ev-socket-ipv6-001",
+      "kind": "SOCKET",
+      "artifact_path": "artifacts/measurements_ipv6.jsonl",
+      "synthetic": true
+    },
+    {
+      "evidence_id": "ev-icmp-ipv6-001",
+      "kind": "ICMP",
+      "artifact_path": "artifacts/measurements_ipv6.jsonl",
+      "synthetic": true
+    },
+    {
+      "evidence_id": "ev-host-ipv6-001",
+      "kind": "HOST_SNAPSHOT",
+      "artifact_path": "artifacts/system_snapshot_ipv6.json",
+      "synthetic": true
+    }
+  ],
+  "feature_results": [
+    {
+      "feature_id": "tcp_connect",
+      "group_id": "G-NET",
+      "status": "PASS",
+      "classification": "OBSERVED",
+      "evidence_ids": [
+        "ev-socket-ipv6-001"
+      ],
+      "started_at_utc": "2026-10-20T03:05:01Z",
+      "ended_at_utc": "2026-10-20T03:05:02Z",
+      "duration_ms": 14,
+      "error_code": null,
+      "limitations": [
+        "합성(synthetic) IPv6 소켓 연결 측정 데이터임"
+      ],
+      "next_checks": []
+    },
+    {
+      "feature_id": "icmp_ping",
+      "group_id": "G-NET",
+      "status": "PASS",
+      "classification": "OBSERVED",
+      "evidence_ids": [
+        "ev-icmp-ipv6-001"
+      ],
+      "started_at_utc": "2026-10-20T03:05:02Z",
+      "ended_at_utc": "2026-10-20T03:05:03Z",
+      "duration_ms": 5,
+      "error_code": null,
+      "limitations": [],
+      "next_checks": []
+    },
+    {
+      "feature_id": "nic_inventory",
+      "group_id": "G-PATH",
+      "status": "PASS",
+      "classification": "OBSERVED",
+      "evidence_ids": [
+        "ev-host-ipv6-001"
+      ],
+      "started_at_utc": "2026-10-20T03:05:00Z",
+      "ended_at_utc": "2026-10-20T03:05:01Z",
+      "duration_ms": 7,
+      "error_code": null,
+      "limitations": [],
+      "next_checks": []
+    },
+    {
+      "feature_id": "route_table",
+      "group_id": "G-PATH",
+      "status": "PASS",
+      "classification": "OBSERVED",
+      "evidence_ids": [
+        "ev-host-ipv6-001"
+      ],
+      "started_at_utc": "2026-10-20T03:05:00Z",
+      "ended_at_utc": "2026-10-20T03:05:01Z",
+      "duration_ms": 6,
+      "error_code": null,
+      "limitations": [],
+      "next_checks": []
+    },
+    {
+      "feature_id": "result_json",
+      "group_id": "G-EVID",
+      "status": "PASS",
+      "classification": "OBSERVED",
+      "evidence_ids": [
+        "ev-socket-ipv6-001",
+        "ev-icmp-ipv6-001",
+        "ev-host-ipv6-001"
+      ],
+      "started_at_utc": "2026-10-20T03:05:03Z",
+      "ended_at_utc": "2026-10-20T03:05:03Z",
+      "duration_ms": 2,
+      "error_code": null,
+      "limitations": [],
+      "next_checks": []
+    }
+  ],
+  "findings": [
+    {
+      "classification": "OBSERVED",
+      "statement": "합성(synthetic) IPv6 소켓 측정 기준 목적지 2001:db8:10::100 포트 1526에 대한 TCP 연결 수립(CONNECTED)이 확인됨.",
+      "evidence_ids": [
+        "ev-socket-ipv6-001"
+      ],
+      "confidence": "high",
+      "limitations": [
+        "본 픽스처는 재현성 시험용 합성(synthetic) 데이터임",
+        "TCP 핸드셰이크 성공은 상위 데이터베이스 인증 성공을 보장하지 않음"
+      ],
+      "next_checks": []
+    }
+  ],
+  "limitations": [
+    "본 픽스처는 IPv6 주소 형식 및 G1 스키마 검증을 위한 합성(synthetic) 데이터임"
+  ],
+  "resource_metrics": {
+    "peak_rss_bytes": null,
+    "avg_cpu_percent": null,
+    "capture_drops": null
+  }
+}

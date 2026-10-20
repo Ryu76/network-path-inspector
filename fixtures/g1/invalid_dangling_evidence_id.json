@@ -1,0 +1,82 @@
+{
+  "schema_version": "1.1",
+  "session_id": "22222222-2222-4222-8222-222222222202",
+  "mode": "standalone",
+  "host_role": "client",
+  "started_at_utc": "2026-10-20T04:05:00Z",
+  "timezone_offset_minutes": 540,
+  "clock_offset_ms": null,
+  "clock_uncertainty_ms": null,
+  "profile": {
+    "schema_version": "1.1",
+    "profile_id": "quick-default",
+    "label": "존재하지 않는 증거 ID 참조 오류 테스트",
+    "mode": "standalone",
+    "selected_features": [
+      "tcp_connect"
+    ],
+    "capture_approved": false,
+    "target": {
+      "host": "192.168.10.100",
+      "port": 1526,
+      "protocol": "TCP"
+    },
+    "limits": {
+      "tcp_timeout_ms": 5000,
+      "max_hops": 30,
+      "retries": 0,
+      "max_concurrent_tcp": 4,
+      "capture_duration_secs": 30,
+      "capture_max_bytes": 52428800,
+      "log_retention_days": 30,
+      "ui_updates_per_second": 4
+    }
+  },
+  "evidence": [
+    {
+      "evidence_id": "ev-socket-real-001",
+      "kind": "SOCKET",
+      "artifact_path": "artifacts/measurements.jsonl",
+      "synthetic": true
+    }
+  ],
+  "feature_results": [
+    {
+      "feature_id": "tcp_connect",
+      "group_id": "G-NET",
+      "status": "PASS",
+      "classification": "OBSERVED",
+      "evidence_ids": [
+        "ev-missing-999"
+      ],
+      "started_at_utc": "2026-10-20T04:05:01Z",
+      "ended_at_utc": "2026-10-20T04:05:02Z",
+      "duration_ms": 11,
+      "error_code": null,
+      "limitations": [],
+      "next_checks": []
+    }
+  ],
+  "findings": [
+    {
+      "classification": "OBSERVED",
+      "statement": "합성(synthetic) 소켓 연결 성공이나 존재하지 않는 증거 ID를 참조함.",
+      "evidence_ids": [
+        "ev-missing-999"
+      ],
+      "confidence": "high",
+      "limitations": [
+        "합성(synthetic) 부정 테스트 픽스처임"
+      ],
+      "next_checks": []
+    }
+  ],
+  "limitations": [
+    "부정 테스트 픽스처: session.evidence에 없는 dangling evidence_id 참조"
+  ],
+  "resource_metrics": {
+    "peak_rss_bytes": null,
+    "avg_cpu_percent": null,
+    "capture_drops": null
+  }
+}

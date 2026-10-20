@@ -1,0 +1,58 @@
+{
+  "schema_version": "1.1",
+  "session_id": "22222222-2222-4222-8222-222222222204",
+  "mode": "standalone",
+  "host_role": "client",
+  "started_at_utc": "2026-10-20T04:15:00Z",
+  "timezone_offset_minutes": 540,
+  "clock_offset_ms": null,
+  "clock_uncertainty_ms": null,
+  "profile": {
+    "schema_version": "1.1",
+    "profile_id": "quick-default",
+    "label": "허용되지 않은 상태 ID 및 미실행 PASS 위장 오류 테스트",
+    "mode": "standalone",
+    "selected_features": [],
+    "capture_approved": false,
+    "target": {
+      "host": "192.168.10.100",
+      "port": 1526,
+      "protocol": "TCP"
+    },
+    "limits": {
+      "tcp_timeout_ms": 5000,
+      "max_hops": 30,
+      "retries": 0,
+      "max_concurrent_tcp": 4,
+      "capture_duration_secs": 30,
+      "capture_max_bytes": 52428800,
+      "log_retention_days": 30,
+      "ui_updates_per_second": 4
+    }
+  },
+  "evidence": [],
+  "feature_results": [
+    {
+      "feature_id": "tcp_connect",
+      "group_id": "G-NET",
+      "status": "NOT_RUN_PASS",
+      "classification": null,
+      "evidence_ids": [],
+      "started_at_utc": null,
+      "ended_at_utc": null,
+      "duration_ms": null,
+      "error_code": null,
+      "limitations": [],
+      "next_checks": []
+    }
+  ],
+  "findings": [],
+  "limitations": [
+    "부정 테스트 픽스처: 계약의 7개 상태 외 NOT_RUN_PASS 사용 및 미선택 기능 위장"
+  ],
+  "resource_metrics": {
+    "peak_rss_bytes": null,
+    "avg_cpu_percent": null,
+    "capture_drops": null
+  }
+}
