@@ -21,7 +21,10 @@
       "$ref": "common-1.1.schema.json#/$defs/Rfc3339DateTime"
     },
     "timezone_offset_minutes": {
-      "type": "integer",
+      "type": [
+        "integer",
+        "null"
+      ],
       "minimum": -840,
       "maximum": 840
     },

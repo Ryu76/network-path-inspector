@@ -45,7 +45,7 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 253,
-      "pattern": "^(?:(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*|(?=.{2,45}$)(?=.*:.*:)[0-9a-fA-F:]+)$",
+      "pattern": "^(?:(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*|(?=.{2,45}$)(?=.*:.*:)[0-9a-fA-F:.]+)$",
       "description": "단일 IPv4, IPv6 또는 도메인 호스트명 (URL, 경로, 자격증명 @, CIDR, 포트, 다중 호스트 금지)"
     },
     "GroupId": {
@@ -98,10 +98,14 @@
       "description": "진단 실행 모드"
     },
     "HostRole": {
-      "type": "string",
+      "type": [
+        "string",
+        "null"
+      ],
       "enum": [
         "client",
-        "server"
+        "server",
+        null
       ],
       "description": "진단 수행 호스트 역할"
     },
@@ -196,49 +200,90 @@
       "oneOf": [
         {
           "properties": {
-            "group_id": { "const": "G-NET" },
+            "group_id": {
+              "const": "G-NET"
+            },
             "feature_id": {
-              "enum": ["tcp_connect", "icmp_ping", "dns_lookup"]
+              "enum": [
+                "tcp_connect",
+                "icmp_ping",
+                "dns_lookup"
+              ]
             }
           }
         },
         {
           "properties": {
-            "group_id": { "const": "G-PATH" },
+            "group_id": {
+              "const": "G-PATH"
+            },
             "feature_id": {
-              "enum": ["icmp_traceroute", "tcp_traceroute", "route_table", "nic_inventory"]
+              "enum": [
+                "icmp_traceroute",
+                "tcp_traceroute",
+                "route_table",
+                "nic_inventory"
+              ]
             }
           }
         },
         {
           "properties": {
-            "group_id": { "const": "G-PKT" },
+            "group_id": {
+              "const": "G-PKT"
+            },
             "feature_id": {
-              "enum": ["packet_capture", "syn_rst_analysis", "firewall_log", "listening_check"]
+              "enum": [
+                "packet_capture",
+                "syn_rst_analysis",
+                "firewall_log",
+                "listening_check"
+              ]
             }
           }
         },
         {
           "properties": {
-            "group_id": { "const": "G-PAIR" },
+            "group_id": {
+              "const": "G-PAIR"
+            },
             "feature_id": {
-              "enum": ["agent_session", "import_bundle", "packet_compare", "clock_skew"]
+              "enum": [
+                "agent_session",
+                "import_bundle",
+                "packet_compare",
+                "clock_skew"
+              ]
             }
           }
         },
         {
           "properties": {
-            "group_id": { "const": "G-OPS" },
+            "group_id": {
+              "const": "G-OPS"
+            },
             "feature_id": {
-              "enum": ["tcp_monitor", "config_change", "history_query"]
+              "enum": [
+                "tcp_monitor",
+                "config_change",
+                "history_query"
+              ]
             }
           }
         },
         {
           "properties": {
-            "group_id": { "const": "G-EVID" },
+            "group_id": {
+              "const": "G-EVID"
+            },
             "feature_id": {
-              "enum": ["result_json", "pdf_report", "pcap_export", "hash_verify", "policy_check"]
+              "enum": [
+                "result_json",
+                "pdf_report",
+                "pcap_export",
+                "hash_verify",
+                "policy_check"
+              ]
             }
           }
         }
