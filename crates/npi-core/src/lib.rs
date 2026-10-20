@@ -1,5 +1,13 @@
+pub mod models;
+pub mod validation;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+pub use models::{
+    CostClass, ExecutionMode, FeatureDefinition, GroupId, Limits, PermissionLevel, Profile, Target,
+};
+pub use validation::{validate_profile, validate_registry};
 
 const G1_CONTRACT_JSON: &str = include_str!("../../../contracts/g1-interface-contract.json");
 
