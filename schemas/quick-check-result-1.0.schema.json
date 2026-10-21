@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "quick-check-result-1.0.schema.json",
+  "title": "Network Quick Check Result Schema (v1.0)",
+  "description": "Network Quick Check 단일 측정 결과 계약 스키마 (Part B v1.2 / qg1-contract.json)",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0",
+      "description": "고정 스키마 버전 (1.0)"
+    },
+    "product": {
+      "type": "string",
+      "const": "network-quick-check",
+      "description": "고정 제품 식별자 (network-quick-check)"
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "진단 세션 고유 식별자 문자열"
+    },
+    "timestamp_iso8601": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time",
+      "description": "ISO 8601 일시 문자열 (미확인 시 null)"
+    },
+    "source_host": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "description": "출발지 호스트 식별자 또는 주소 (미확인 시 null)"
+    },
+    "target_host": {
+      "type": "string",
+      "minLength": 1,
+      "description": "사용자가 입력한 목적지 원문 호스트 문자열"
+    },
+    "resolved_ip": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "description": "해석된 대상 IP 주소 (미확인 시 null, 임의 발명 금지)"
+    },
+    "target_port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535,
+      "description": "대상 TCP 포트 번호 (1..=65535, 0 금지)"
+    },
+    "feature": {
+      "type": "string",
+      "enum": [
+        "tcp_connect",
+        "icmp_ping",
+        "icmp_traceroute",
+        "dns_lookup",
+        "local_network"
+      ],
+      "description": "측정 기능 식별자"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "PASS",
+        "FAIL",
+        "WARN",
+        "SKIPPED",
+        "UNKNOWN"
+      ],
+      "description": "진단 결과 상태"
+    },
+    "elapsed_ms": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "description": "경과 시간(밀리초, 미확인 시 null)"
+    },
+    "os_error_code": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "원시 OS/Winsock 오류 코드 (정상 또는 미확인 시 null)"
+    },
+    "details": {
+      "type": "object",
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "description": "원시 측정 결과 분류 문자열"
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "측정 한계 및 안전 고지 목록"
+        },
+        "raw_measurement": {
+          "type": "object",
+          "description": "프로브 측정 엔진이 반환한 원시 DTO 객체"
+        }
+      },
+      "required": [
+        "outcome",
+        "limitations",
+        "raw_measurement"
+      ],
+      "additionalProperties": false,
+      "description": "세부 측정 정보 및 원본 DTO를 담은 객체"
+    },
+    "evidence_level": {
+      "type": "string",
+      "enum": [
+        "OBSERVED",
+        "INFERRED",
+        "UNKNOWN"
+      ],
+      "description": "근거 수준 배지"
+    }
+  },
+  "required": [
+    "schema_version",
+    "product",
+    "session_id",
+    "timestamp_iso8601",
+    "source_host",
+    "target_host",
+    "resolved_ip",
+    "target_port",
+    "feature",
+    "status",
+    "elapsed_ms",
+    "os_error_code",
+    "details",
+    "evidence_level"
+  ],
+  "additionalProperties": false
+}

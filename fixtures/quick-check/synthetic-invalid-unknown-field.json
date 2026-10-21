@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0",
+  "product": "network-quick-check",
+  "session_id": "synthetic-session-unknown-field",
+  "timestamp_iso8601": "2026-10-21T02:30:00Z",
+  "source_host": null,
+  "target_host": "127.0.0.1",
+  "resolved_ip": "127.0.0.1",
+  "target_port": 8080,
+  "feature": "tcp_connect",
+  "status": "PASS",
+  "elapsed_ms": 5,
+  "os_error_code": null,
+  "details": {
+    "outcome": "CONNECTED",
+    "limitations": [
+      "[합성(synthetic) 음성 테스트 픽스처] 미정의 필드 거부(additionalProperties: false) 검증용 데이터입니다."
+    ],
+    "raw_measurement": {
+      "target": "127.0.0.1:8080",
+      "outcome": "CONNECTED",
+      "local_address": null,
+      "elapsed_ms": 5,
+      "error_code": null,
+      "error_message": null,
+      "application_bytes_sent": 0,
+      "limitations": []
+    }
+  },
+  "evidence_level": "OBSERVED",
+  "prohibited_extra_field": "이 필드는 계약에 정의되지 않은 금지된 필드입니다."
+}

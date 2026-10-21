@@ -32,6 +32,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "network-core"
+version = "0.1.0"
+dependencies = [
+ "npi-core",
+ "npi-probes",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "npi-core"
 version = "0.1.0"
 dependencies = [

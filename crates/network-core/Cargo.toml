@@ -1,0 +1,11 @@
+[package]
+name = "network-core"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+npi-core = { path = "../npi-core" }
+npi-probes = { path = "../npi-probes" }
+serde = { workspace = true }
+serde_json = { workspace = true }
