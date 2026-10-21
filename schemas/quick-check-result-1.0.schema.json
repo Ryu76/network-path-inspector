@@ -42,12 +42,20 @@
       "description": "사용자가 입력한 목적지 원문 호스트 문자열"
     },
     "resolved_ip": {
-      "type": [
-        "string",
-        "null"
+      "oneOf": [
+        {
+          "type": "string",
+          "format": "ipv4"
+        },
+        {
+          "type": "string",
+          "format": "ipv6"
+        },
+        {
+          "type": "null"
+        }
       ],
-      "minLength": 1,
-      "description": "해석된 대상 IP 주소 (미확인 시 null, 임의 발명 금지)"
+      "description": "해석된 대상 IP 주소 (실제 IPv4/IPv6 형식, 미확인 시 null, 임의 발명 금지)"
     },
     "target_port": {
       "type": "integer",
@@ -90,7 +98,9 @@
         "integer",
         "null"
       ],
-      "description": "원시 OS/Winsock 오류 코드 (정상 또는 미확인 시 null)"
+      "minimum": -2147483648,
+      "maximum": 2147483647,
+      "description": "원시 OS/Winsock 오류 코드 (i32 범위, 정상 또는 미확인 시 null)"
     },
     "details": {
       "type": "object",
