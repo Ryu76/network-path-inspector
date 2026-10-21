@@ -10,9 +10,10 @@ use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use network_core::{
-    EvidenceLevel, QuickContext, QuickFeature, QuickResult, QuickStatus, TcpMeasurement,
-    TcpOutcome, classify_tcp_error, collect_host_snapshot, connect_once, ping_once,
-    tcp_to_quick_result, validate_quick_result, validate_rfc3339_timestamp,
+    EVIDENCE_VALUES_COUNT, EvidenceLevel, FEATURE_VALUES_COUNT, QuickContext, QuickFeature,
+    QuickResult, QuickStatus, STATUS_VALUES_COUNT, TcpMeasurement, TcpOutcome, classify_tcp_error,
+    collect_host_snapshot, connect_once, ping_once, tcp_to_quick_result, validate_quick_result,
+    validate_rfc3339_timestamp,
 };
 use serde_json::Value;
 
@@ -1020,4 +1021,382 @@ fn schema_additional_ip_and_range_validation() {
     let mut invalid_dto = valid_dto.clone();
     invalid_dto.product = "network-inspector".to_string();
     assert!(validate_quick_result(&invalid_dto).is_err());
+}
+
+/// 16. [합성(synthetic) 데이터 / 네트워크 없음] feature 필드의 엄격한 string 타입 검증 및 5개 지원 열거값 라운드트립 검증.
+///
+/// Serde 기본 외부 태그 unit variant 파싱으로 인해 허용되던 객체 형태(예: `{"tcp_connect": null}`)를 포함하여,
+/// null, 배열, 숫자, bool 등 비문자열 타입이 엄격히 거부되는지 확인하고,
+/// 공식 스키마에 정의된 5개 정규 feature 문자열("tcp_connect", "icmp_ping", "icmp_traceroute", "dns_lookup", "local_network")이
+/// 정확히 역직렬화 및 직렬화 라운드트립에 성공하는지 검증합니다.
+#[test]
+fn regression_feature_string_only_strict_type_and_roundtrip() {
+    let valid_base_json = serde_json::json!({
+        "schema_version": "1.0",
+        "product": "network-quick-check",
+        "session_id": "synthetic-feature-test-session",
+        "timestamp_iso8601": "2026-10-21T02:30:00Z",
+        "source_host": null,
+        "target_host": "127.0.0.1",
+        "resolved_ip": "127.0.0.1",
+        "target_port": 80,
+        "feature": "tcp_connect",
+        "status": "PASS",
+        "elapsed_ms": 1,
+        "os_error_code": null,
+        "details": {
+            "outcome": "CONNECTED",
+            "limitations": [],
+            "raw_measurement": {}
+        },
+        "evidence_level": "OBSERVED"
+    });
+
+    // 1. 비문자열(객체, null, 배열, 숫자, bool) 거부 검증
+    let invalid_features = [
+        // Serde 외부 태그 unit 객체 형태 거부
+        serde_json::json!({"tcp_connect": null}),
+        serde_json::json!({"icmp_ping": null}),
+        serde_json::json!({"dns_lookup": null}),
+        serde_json::json!({}),
+        serde_json::json!({"feature": "tcp_connect"}),
+        // null 거부
+        serde_json::json!(null),
+        // 배열 거부
+        serde_json::json!([]),
+        serde_json::json!(["tcp_connect"]),
+        // 숫자 거부
+        serde_json::json!(0),
+        serde_json::json!(123),
+        serde_json::json!(-1),
+        // bool 거부
+        serde_json::json!(true),
+        serde_json::json!(false),
+    ];
+
+    for disallowed in invalid_features {
+        let mut bad_json = valid_base_json.clone();
+        bad_json["feature"] = disallowed.clone();
+        let parse_result = serde_json::from_value::<QuickResult>(bad_json);
+        assert!(
+            parse_result.is_err(),
+            "feature가 비문자열({disallowed:?})인 경우 반드시 역직렬화 거부되어야 함"
+        );
+    }
+
+    // JSON 문자열 리터럴로 파싱 시에도 객체 형태는 거부되어야 함
+    let raw_external_tag_json = r#"{
+        "schema_version": "1.0",
+        "product": "network-quick-check",
+        "session_id": "synthetic-session",
+        "timestamp_iso8601": null,
+        "source_host": null,
+        "target_host": "127.0.0.1",
+        "resolved_ip": "127.0.0.1",
+        "target_port": 80,
+        "feature": {"tcp_connect": null},
+        "status": "PASS",
+        "elapsed_ms": 1,
+        "os_error_code": null,
+        "details": {"outcome": "CONNECTED", "limitations": [], "raw_measurement": {}},
+        "evidence_level": "OBSERVED"
+    }"#;
+    assert!(
+        serde_json::from_str::<QuickResult>(raw_external_tag_json).is_err(),
+        "JSON 문자열에서 feature: {{\"tcp_connect\": null}} 객체는 거부되어야 함"
+    );
+
+    // 2. 5개 정상 feature 열거값의 정상 역직렬화 및 직렬화 라운드트립 검증
+    let valid_features = [
+        ("tcp_connect", QuickFeature::TcpConnect),
+        ("icmp_ping", QuickFeature::IcmpPing),
+        ("icmp_traceroute", QuickFeature::IcmpTraceroute),
+        ("dns_lookup", QuickFeature::DnsLookup),
+        ("local_network", QuickFeature::LocalNetwork),
+    ];
+
+    assert_eq!(
+        valid_features.len(),
+        FEATURE_VALUES_COUNT,
+        "모든 지원 feature 수가 일치해야 함"
+    );
+
+    for (feat_str, expected_enum) in valid_features {
+        // (a) JSON Value로부터 역직렬화
+        let mut valid_json = valid_base_json.clone();
+        valid_json["feature"] = serde_json::json!(feat_str);
+        let parsed: QuickResult = serde_json::from_value(valid_json)
+            .unwrap_or_else(|e| panic!("유효한 feature '{feat_str}' 역직렬화 실패: {e}"));
+        assert_eq!(
+            parsed.feature, expected_enum,
+            "feature 열거형 일치 확인: '{feat_str}'"
+        );
+        assert_eq!(parsed.feature.as_str(), feat_str);
+
+        // (b) 직렬화 -> 재역직렬화 라운드트립
+        let serialized = serde_json::to_string(&parsed).expect("직렬화 성공 기대");
+        assert!(
+            serialized.contains(&format!("\"feature\":\"{feat_str}\"")),
+            "직렬화 결과에 정규 문자열 필드가 포함되어야 함"
+        );
+        let roundtrip: QuickResult =
+            serde_json::from_str(&serialized).expect("라운드트립 역직렬화 성공 기대");
+        assert_eq!(
+            roundtrip.feature, expected_enum,
+            "라운드트립 결과 열거형 일치 확인"
+        );
+        assert_eq!(roundtrip, parsed);
+    }
+}
+
+/// 17. [합성(synthetic) 데이터 / 네트워크 없음] status 필드의 엄격한 string 타입 검증 및 5개 지원 열거값 라운드트립 검증.
+///
+/// Serde 기본 외부 태그 unit variant 파싱으로 인해 허용되던 객체 형태(예: `{"PASS": null}`)를 포함하여,
+/// null, 배열, 숫자, bool 등 비문자열 타입이 엄격히 거부되는지 확인하고,
+/// 공식 스키마에 정의된 5개 정규 status 문자열("PASS", "FAIL", "WARN", "SKIPPED", "UNKNOWN")이
+/// 정확히 역직렬화 및 직렬화 라운드트립에 성공하는지 검증합니다.
+#[test]
+fn regression_status_string_only_strict_type_and_roundtrip() {
+    let valid_base_json = serde_json::json!({
+        "schema_version": "1.0",
+        "product": "network-quick-check",
+        "session_id": "synthetic-status-test-session",
+        "timestamp_iso8601": "2026-10-21T02:30:00Z",
+        "source_host": null,
+        "target_host": "127.0.0.1",
+        "resolved_ip": "127.0.0.1",
+        "target_port": 80,
+        "feature": "tcp_connect",
+        "status": "PASS",
+        "elapsed_ms": 1,
+        "os_error_code": null,
+        "details": {
+            "outcome": "CONNECTED",
+            "limitations": [],
+            "raw_measurement": {}
+        },
+        "evidence_level": "OBSERVED"
+    });
+
+    // 1. 비문자열(객체, null, 배열, 숫자, bool) 거부 검증
+    let invalid_statuses = [
+        // Serde 외부 태그 unit 객체 형태 거부
+        serde_json::json!({"PASS": null}),
+        serde_json::json!({"FAIL": null}),
+        serde_json::json!({"WARN": null}),
+        serde_json::json!({"SKIPPED": null}),
+        serde_json::json!({"UNKNOWN": null}),
+        serde_json::json!({}),
+        serde_json::json!({"status": "PASS"}),
+        // null 거부
+        serde_json::json!(null),
+        // 배열 거부
+        serde_json::json!([]),
+        serde_json::json!(["PASS"]),
+        // 숫자 거부
+        serde_json::json!(0),
+        serde_json::json!(200),
+        serde_json::json!(-1),
+        // bool 거부
+        serde_json::json!(true),
+        serde_json::json!(false),
+    ];
+
+    for disallowed in invalid_statuses {
+        let mut bad_json = valid_base_json.clone();
+        bad_json["status"] = disallowed.clone();
+        let parse_result = serde_json::from_value::<QuickResult>(bad_json);
+        assert!(
+            parse_result.is_err(),
+            "status가 비문자열({disallowed:?})인 경우 반드시 역직렬화 거부되어야 함"
+        );
+    }
+
+    // JSON 문자열 리터럴로 파싱 시에도 객체 형태는 거부되어야 함
+    let raw_external_tag_json = r#"{
+        "schema_version": "1.0",
+        "product": "network-quick-check",
+        "session_id": "synthetic-session",
+        "timestamp_iso8601": null,
+        "source_host": null,
+        "target_host": "127.0.0.1",
+        "resolved_ip": "127.0.0.1",
+        "target_port": 80,
+        "feature": "tcp_connect",
+        "status": {"PASS": null},
+        "elapsed_ms": 1,
+        "os_error_code": null,
+        "details": {"outcome": "CONNECTED", "limitations": [], "raw_measurement": {}},
+        "evidence_level": "OBSERVED"
+    }"#;
+    assert!(
+        serde_json::from_str::<QuickResult>(raw_external_tag_json).is_err(),
+        "JSON 문자열에서 status: {{\"PASS\": null}} 객체는 거부되어야 함"
+    );
+
+    // 2. 5개 정상 status 열거값의 정상 역직렬화 및 직렬화 라운드트립 검증
+    let valid_statuses = [
+        ("PASS", QuickStatus::PASS),
+        ("FAIL", QuickStatus::FAIL),
+        ("WARN", QuickStatus::WARN),
+        ("SKIPPED", QuickStatus::SKIPPED),
+        ("UNKNOWN", QuickStatus::UNKNOWN),
+    ];
+
+    assert_eq!(
+        valid_statuses.len(),
+        STATUS_VALUES_COUNT,
+        "모든 지원 status 수가 일치해야 함"
+    );
+
+    for (stat_str, expected_enum) in valid_statuses {
+        // (a) JSON Value로부터 역직렬화
+        let mut valid_json = valid_base_json.clone();
+        valid_json["status"] = serde_json::json!(stat_str);
+        let parsed: QuickResult = serde_json::from_value(valid_json)
+            .unwrap_or_else(|e| panic!("유효한 status '{stat_str}' 역직렬화 실패: {e}"));
+        assert_eq!(
+            parsed.status, expected_enum,
+            "status 열거형 일치 확인: '{stat_str}'"
+        );
+        assert_eq!(parsed.status.as_str(), stat_str);
+
+        // (b) 직렬화 -> 재역직렬화 라운드트립
+        let serialized = serde_json::to_string(&parsed).expect("직렬화 성공 기대");
+        assert!(
+            serialized.contains(&format!("\"status\":\"{stat_str}\"")),
+            "직렬화 결과에 정규 문자열 필드가 포함되어야 함"
+        );
+        let roundtrip: QuickResult =
+            serde_json::from_str(&serialized).expect("라운드트립 역직렬화 성공 기대");
+        assert_eq!(
+            roundtrip.status, expected_enum,
+            "라운드트립 결과 열거형 일치 확인"
+        );
+        assert_eq!(roundtrip, parsed);
+    }
+}
+
+/// 18. [합성(synthetic) 데이터 / 네트워크 없음] evidence_level 필드의 엄격한 string 타입 검증 및 3개 지원 열거값 라운드트립 검증.
+///
+/// Serde 기본 외부 태그 unit variant 파싱으로 인해 허용되던 객체 형태(예: `{"OBSERVED": null}`)를 포함하여,
+/// null, 배열, 숫자, bool 등 비문자열 타입이 엄격히 거부되는지 확인하고,
+/// 공식 스키마에 정의된 3개 정규 evidence_level 문자열("OBSERVED", "INFERRED", "UNKNOWN")이
+/// 정확히 역직렬화 및 직렬화 라운드트립에 성공하는지 검증합니다.
+#[test]
+fn regression_evidence_level_string_only_strict_type_and_roundtrip() {
+    let valid_base_json = serde_json::json!({
+        "schema_version": "1.0",
+        "product": "network-quick-check",
+        "session_id": "synthetic-evidence-test-session",
+        "timestamp_iso8601": "2026-10-21T02:30:00Z",
+        "source_host": null,
+        "target_host": "127.0.0.1",
+        "resolved_ip": "127.0.0.1",
+        "target_port": 80,
+        "feature": "tcp_connect",
+        "status": "PASS",
+        "elapsed_ms": 1,
+        "os_error_code": null,
+        "details": {
+            "outcome": "CONNECTED",
+            "limitations": [],
+            "raw_measurement": {}
+        },
+        "evidence_level": "OBSERVED"
+    });
+
+    // 1. 비문자열(객체, null, 배열, 숫자, bool) 거부 검증
+    let invalid_evidences = [
+        // Serde 외부 태그 unit 객체 형태 거부
+        serde_json::json!({"OBSERVED": null}),
+        serde_json::json!({"INFERRED": null}),
+        serde_json::json!({"UNKNOWN": null}),
+        serde_json::json!({}),
+        serde_json::json!({"evidence_level": "OBSERVED"}),
+        // null 거부
+        serde_json::json!(null),
+        // 배열 거부
+        serde_json::json!([]),
+        serde_json::json!(["OBSERVED"]),
+        // 숫자 거부
+        serde_json::json!(0),
+        serde_json::json!(1),
+        serde_json::json!(-1),
+        // bool 거부
+        serde_json::json!(true),
+        serde_json::json!(false),
+    ];
+
+    for disallowed in invalid_evidences {
+        let mut bad_json = valid_base_json.clone();
+        bad_json["evidence_level"] = disallowed.clone();
+        let parse_result = serde_json::from_value::<QuickResult>(bad_json);
+        assert!(
+            parse_result.is_err(),
+            "evidence_level이 비문자열({disallowed:?})인 경우 반드시 역직렬화 거부되어야 함"
+        );
+    }
+
+    // JSON 문자열 리터럴로 파싱 시에도 객체 형태는 거부되어야 함
+    let raw_external_tag_json = r#"{
+        "schema_version": "1.0",
+        "product": "network-quick-check",
+        "session_id": "synthetic-session",
+        "timestamp_iso8601": null,
+        "source_host": null,
+        "target_host": "127.0.0.1",
+        "resolved_ip": "127.0.0.1",
+        "target_port": 80,
+        "feature": "tcp_connect",
+        "status": "PASS",
+        "elapsed_ms": 1,
+        "os_error_code": null,
+        "details": {"outcome": "CONNECTED", "limitations": [], "raw_measurement": {}},
+        "evidence_level": {"OBSERVED": null}
+    }"#;
+    assert!(
+        serde_json::from_str::<QuickResult>(raw_external_tag_json).is_err(),
+        "JSON 문자열에서 evidence_level: {{\"OBSERVED\": null}} 객체는 거부되어야 함"
+    );
+
+    // 2. 3개 정상 evidence_level 열거값의 정상 역직렬화 및 직렬화 라운드트립 검증
+    let valid_evidences = [
+        ("OBSERVED", EvidenceLevel::OBSERVED),
+        ("INFERRED", EvidenceLevel::INFERRED),
+        ("UNKNOWN", EvidenceLevel::UNKNOWN),
+    ];
+
+    assert_eq!(
+        valid_evidences.len(),
+        EVIDENCE_VALUES_COUNT,
+        "모든 지원 evidence_level 수가 일치해야 함"
+    );
+
+    for (ev_str, expected_enum) in valid_evidences {
+        // (a) JSON Value로부터 역직렬화
+        let mut valid_json = valid_base_json.clone();
+        valid_json["evidence_level"] = serde_json::json!(ev_str);
+        let parsed: QuickResult = serde_json::from_value(valid_json)
+            .unwrap_or_else(|e| panic!("유효한 evidence_level '{ev_str}' 역직렬화 실패: {e}"));
+        assert_eq!(
+            parsed.evidence_level, expected_enum,
+            "evidence_level 열거형 일치 확인: '{ev_str}'"
+        );
+        assert_eq!(parsed.evidence_level.as_str(), ev_str);
+
+        // (b) 직렬화 -> 재역직렬화 라운드트립
+        let serialized = serde_json::to_string(&parsed).expect("직렬화 성공 기대");
+        assert!(
+            serialized.contains(&format!("\"evidence_level\":\"{ev_str}\"")),
+            "직렬화 결과에 정규 문자열 필드가 포함되어야 함"
+        );
+        let roundtrip: QuickResult =
+            serde_json::from_str(&serialized).expect("라운드트립 역직렬화 성공 기대");
+        assert_eq!(
+            roundtrip.evidence_level, expected_enum,
+            "라운드트립 결과 열거형 일치 확인"
+        );
+        assert_eq!(roundtrip, parsed);
+    }
 }

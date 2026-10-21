@@ -416,11 +416,19 @@ impl<'de> Deserialize<'de> for QuickResult {
         }
         let target_port = target_port_val as u16;
 
-        let feature: QuickFeature = serde_json::from_value(obj["feature"].clone())
-            .map_err(|err| DeError::custom(format!("feature 역직렬화 실패: {err}")))?;
+        let feature_str = obj["feature"]
+            .as_str()
+            .ok_or_else(|| DeError::custom("feature는 문자열이어야 합니다."))?;
+        let feature: QuickFeature =
+            serde_json::from_value(serde_json::Value::String(feature_str.to_string()))
+                .map_err(|err| DeError::custom(format!("feature 역직렬화 실패: {err}")))?;
 
-        let status: QuickStatus = serde_json::from_value(obj["status"].clone())
-            .map_err(|err| DeError::custom(format!("status 역직렬화 실패: {err}")))?;
+        let status_str = obj["status"]
+            .as_str()
+            .ok_or_else(|| DeError::custom("status는 문자열이어야 합니다."))?;
+        let status: QuickStatus =
+            serde_json::from_value(serde_json::Value::String(status_str.to_string()))
+                .map_err(|err| DeError::custom(format!("status 역직렬화 실패: {err}")))?;
 
         let elapsed_ms = match &obj["elapsed_ms"] {
             serde_json::Value::Null => None,
@@ -490,8 +498,11 @@ impl<'de> Deserialize<'de> for QuickResult {
             ));
         }
 
+        let evidence_str = obj["evidence_level"]
+            .as_str()
+            .ok_or_else(|| DeError::custom("evidence_level은 문자열이어야 합니다."))?;
         let evidence_level: EvidenceLevel =
-            serde_json::from_value(obj["evidence_level"].clone())
+            serde_json::from_value(serde_json::Value::String(evidence_str.to_string()))
                 .map_err(|err| DeError::custom(format!("evidence_level 역직렬화 실패: {err}")))?;
 
         Ok(QuickResult {
