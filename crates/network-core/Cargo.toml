@@ -9,3 +9,6 @@ npi-core = { path = "../npi-core" }
 npi-probes = { path = "../npi-probes" }
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+# 기존 공통 프로브에 이미 잠긴 Tokio를 실행 스케줄러에서 직접 재사용한다.
+tokio = { version = "=1.52.3", features = ["rt", "net", "time", "macros", "sync"] }

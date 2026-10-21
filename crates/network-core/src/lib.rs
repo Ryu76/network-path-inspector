@@ -35,3 +35,8 @@ pub use quick::{
     validate_rfc3339_timestamp,
 };
 pub use tcp::{TcpMeasurement, TcpOutcome, classify_tcp_error, connect_once};
+
+// QG2 실행기 API는 전용 writer에서 생성하며 두 의존 모듈은 보존커밋 사본이다.
+pub mod targets;
+pub mod measurements;
+pub mod runner;
