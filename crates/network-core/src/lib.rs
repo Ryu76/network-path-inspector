@@ -35,3 +35,6 @@ pub use quick::{
     validate_rfc3339_timestamp,
 };
 pub use tcp::{TcpMeasurement, TcpOutcome, classify_tcp_error, connect_once};
+
+// QG2 전용 writer가 생성할 새 모듈. 기존 facade와 Inspector 구현은 보존한다.
+pub mod measurements;
