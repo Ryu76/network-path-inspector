@@ -40,3 +40,7 @@ pub use tcp::{TcpMeasurement, TcpOutcome, classify_tcp_error, connect_once};
 pub mod measurements;
 pub mod runner;
 pub mod targets;
+
+// 기존 OS resolver 구현을 의존성 순환 없는 공용 crate로 재사용한다.
+pub use network_resolver as dns_engine;
+pub mod dns;
