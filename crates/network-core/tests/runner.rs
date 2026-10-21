@@ -9,8 +9,8 @@
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use network_core::measurements::{host_to_quick_result, icmp_to_quick_result};
@@ -470,12 +470,14 @@ async fn test_07_pre_cancellation_and_mid_cancellation_preserves_contract() {
     let backend_pre = Arc::new(MockProbeBackend::new());
     let cancel_pre = Arc::new(AtomicBool::new(true));
 
-    let targets = vec![
-        make_target("127.0.0.1", 80),
-        make_target("127.0.0.2", 80),
-    ];
+    let targets = vec![make_target("127.0.0.1", 80), make_target("127.0.0.2", 80)];
     let features = vec![QuickFeature::TcpConnect, QuickFeature::IcmpPing];
-    let req_pre = make_request(targets.clone(), features.clone(), 2, DEFAULT_MAX_RESULT_BYTES);
+    let req_pre = make_request(
+        targets.clone(),
+        features.clone(),
+        2,
+        DEFAULT_MAX_RESULT_BYTES,
+    );
 
     let report_pre = run_quick(&req_pre, backend_pre.clone(), cancel_pre)
         .await
@@ -608,7 +610,9 @@ async fn test_10_raw_os_error_and_refused_timeout_classification_preserved() {
             local_address: None,
             elapsed_ms: 15,
             error_code: Some(10061),
-            error_message: Some("대상 컴퓨터에서 연결을 거부했으므로 연결하지 못했습니다.".to_string()),
+            error_message: Some(
+                "대상 컴퓨터에서 연결을 거부했으므로 연결하지 못했습니다.".to_string(),
+            ),
             application_bytes_sent: 0,
             limitations: vec!["synthetic-os-refused".to_string()],
         };
@@ -638,8 +642,8 @@ async fn test_10_raw_os_error_and_refused_timeout_classification_preserved() {
 #[tokio::test]
 #[ignore = "실제 루프백 검증: 부모 명시 실행"]
 async fn test_11_live_loopback_ipv4_tcp_connect_and_ping() {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0")
-        .expect("IPv4 루프백 임의 포트 바인딩 성공");
+    let listener =
+        std::net::TcpListener::bind("127.0.0.1:0").expect("IPv4 루프백 임의 포트 바인딩 성공");
     let local_addr = listener.local_addr().unwrap();
 
     let backend = Arc::new(NativeProbeBackend);
@@ -674,14 +678,8 @@ async fn test_11_live_loopback_ipv4_tcp_connect_and_ping() {
 #[tokio::test]
 #[ignore = "실제 루프백 검증: 부모 명시 실행"]
 async fn test_12_live_loopback_ipv6_tcp_connect_and_ping() {
-    let listener_res = std::net::TcpListener::bind("[::1]:0");
-    let listener = match listener_res {
-        Ok(l) => l,
-        Err(_) => {
-            // 호스트 환경에서 IPv6가 비활성화되어 있는 경우 안전하게 스킵
-            return;
-        }
-    };
+    let listener = std::net::TcpListener::bind("[::1]:0")
+        .expect("IPv6 루프백 바인딩이 불가하면 환경 미검증 실패로 남긴다 (침묵 성공 금지)");
     let local_addr = listener.local_addr().unwrap();
 
     let backend = Arc::new(NativeProbeBackend);
@@ -700,9 +698,16 @@ async fn test_12_live_loopback_ipv6_tcp_connect_and_ping() {
     assert_eq!(tcp_res.status, QuickStatus::PASS);
     assert_eq!(tcp_res.evidence_level, EvidenceLevel::OBSERVED);
     assert_eq!(tcp_res.details["outcome"], "CONNECTED");
+    assert_eq!(tcp_res.details["raw_measurement"]["application_bytes_sent"], 0);
 
     let icmp_res = &report.results[1];
     assert_eq!(icmp_res.feature, QuickFeature::IcmpPing);
+    assert_eq!(icmp_res.status, QuickStatus::PASS);
+    assert_eq!(icmp_res.evidence_level, EvidenceLevel::OBSERVED);
+    assert_eq!(report.invocations.tcp_connect, 1);
+    assert_eq!(report.invocations.icmp_ping, 1);
+    assert!(!report.cancelled && !report.limit_reached);
+    assert_eq!(report.omitted_results, 0);
 
     drop(listener);
 }

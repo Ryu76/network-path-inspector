@@ -451,9 +451,7 @@ pub fn parse_target_list(input: &str) -> Result<Vec<QuickTarget>, Vec<InputError
                 continue;
             }
 
-            let mut parts = raw_line.splitn(2, ':');
-            let h = parts.next().unwrap();
-            let p = parts.next().unwrap();
+            let (h, p) = raw_line.split_once(':').expect("콜론 개수 사전 검증 완료");
             (h, p)
         };
 
@@ -559,20 +557,21 @@ pub fn build_quick_plan(
         });
     }
 
-    for target in targets {
+    for (idx, target) in targets.iter().enumerate() {
+        let target_idx = idx + 1;
         if !(1..=65535).contains(&target.port) {
             errors.push(InputError {
                 line: 0,
                 message: format!(
-                    "대상 '{}'의 포트 번호({})가 유효 범위(1..=65535)를 벗어났습니다.",
-                    target.host, target.port
+                    "대상 #{target_idx}의 포트 번호({})가 유효 범위(1..=65535)를 벗어났습니다.",
+                    target.port
                 ),
             });
         }
         if let Err(e) = validate_target_host_internal(&target.host) {
             errors.push(InputError {
                 line: 0,
-                message: format!("대상 '{}'의 호스트가 유효하지 않습니다: {e}", target.host),
+                message: format!("대상 #{target_idx}의 호스트가 유효하지 않습니다: {e}"),
             });
         }
     }

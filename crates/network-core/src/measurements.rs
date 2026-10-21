@@ -46,10 +46,10 @@ fn validate_context_metadata(ctx: &QuickContext, errors: &mut Vec<String>) {
             errors.push(format!("timestamp_iso8601 형식 오류: {err}"));
         }
     }
-    if let Some(sh) = &ctx.source_host {
-        if sh.trim().is_empty() {
-            errors.push("source_host는 비어있을 수 없습니다.".to_string());
-        }
+    if let Some(sh) = &ctx.source_host
+        && sh.trim().is_empty()
+    {
+        errors.push("source_host는 비어있을 수 없습니다.".to_string());
     }
 }
 
@@ -58,10 +58,10 @@ fn validate_context_metadata(ctx: &QuickContext, errors: &mut Vec<String>) {
 /// ## 규칙 및 불변식
 /// 1. 컨텍스트 검증: 포트 0, 빈 세션 ID, 빈 대상 호스트, 유효하지 않은 타임스탬프 등은 거부합니다.
 /// 2. IP 일관성 검증 (교차 오염 방지):
-///    - `measurement.target`의 IpAddr 파싱 성공 시:
+///    - `measurement.target`의 원문(trim 없는) IpAddr 파싱 성공 시:
 ///      - `ctx.target_host`가 IP 리터럴인 경우 수치 비교하여 불일치 시 거부합니다.
 ///      - `ctx.target_host`가 도메인인 경우 임의 DNS 조회를 하지 않고 실측 IP를 `resolved_ip`로 유도합니다.
-///    - `measurement.target` 파싱 실패 시 `resolved_ip`는 `None`(`null`)으로 유지하며 조회를 발명하지 않습니다.
+///    - `measurement.target` 파싱 실패 시(공백 포함, 미해석 호스트 등) `resolved_ip`는 `None`(`null`)으로 유지하며 조회를 발명하지 않습니다.
 /// 3. ICMP 상태 매핑 (frozen contract 준수):
 ///    - `REPLY` -> `(QuickStatus::PASS, EvidenceLevel::OBSERVED)`
 ///    - `TIMEOUT` -> `(QuickStatus::FAIL, EvidenceLevel::OBSERVED)`
@@ -86,16 +86,15 @@ pub fn icmp_to_quick_result(
     validate_context_metadata(ctx, &mut errors);
 
     let mut resolved_ip: Option<String> = None;
-    if let Ok(parsed_ip) = measurement.target.trim().parse::<IpAddr>() {
+    if let Ok(parsed_ip) = measurement.target.parse::<IpAddr>() {
         resolved_ip = Some(parsed_ip.to_string());
 
-        if let Ok(ctx_ip) = ctx.target_host.trim().parse::<IpAddr>() {
-            if parsed_ip != ctx_ip {
-                errors.push(format!(
-                    "측정 대상 IP({})가 컨텍스트 대상 IP({})와 일치하지 않습니다 (IP 불일치 방지).",
-                    parsed_ip, ctx_ip
-                ));
-            }
+        if let Ok(ctx_ip) = ctx.target_host.trim().parse::<IpAddr>()
+            && parsed_ip != ctx_ip
+        {
+            errors.push(format!(
+                "측정 대상 IP({parsed_ip})가 컨텍스트 대상 IP({ctx_ip})와 일치하지 않습니다 (IP 불일치 방지)."
+            ));
         }
     }
 
@@ -181,13 +180,15 @@ pub fn icmp_to_quick_result(
 ///    - `routes`: `Vec<RouteEntry>` 구조로 검증 (유효한 빈 배열 `[]`는 0건 관찰로 인정).
 ///    - `selected_route`: `SelectedRouteEntry` 구조로 검증.
 ///      단, `remote_connectivity_evidence == true`인 경우 위조 상태로 판정하여 유효한 라우트 컴포넌트로 승인하지 않고 거부/한계 분리.
+///      `selected_route.target` 원문(trim 없는)이 유효한 `IpAddr`가 아닌 경우 컴포넌트 불량으로 판정하고
+///      limitations에 `target.invalid` 이유를 명시.
 /// 3. 상태(status/evidence_level/outcome) 판정 규칙:
 ///    - 세 구성요소 모두 유효하고 `snapshot.errors`가 비어있음 -> `PASS`, `OBSERVED`, outcome `"COLLECTED"`
 ///    - 한 개 이상 유효 관찰이 존재하고, `snapshot.errors`가 존재하거나 다른 구성요소가 실패 -> `WARN`, `OBSERVED`, outcome `"PARTIAL"`
 ///    - 모든 구성요소가 수집 실패/null/불량 -> `UNKNOWN`, `UNKNOWN`, outcome `"UNAVAILABLE"`
 ///      (최상위 status에 임의의 UNAVAILABLE 추가 금지)
 /// 4. 대상 IP 일관성 검증 및 교차 오염 방지:
-///    - `selected_route.target`을 numeric `IpAddr`로 파싱하여 성공 시:
+///    - `selected_route.target` 원문(trim 없는)을 numeric `IpAddr`로 파싱하여 성공 시:
 ///      - `ctx.target_host`가 IP 리터럴인 경우 수치 비교하여 불일치 시 거부합니다 (`Err`).
 ///      - 일치하거나 도메인인 경우 해당 실측 주소를 `resolved_ip`로 유도합니다.
 ///    - `snapshot` 자체에 유효한 대상 IP가 없으면 `resolved_ip`는 `None`(`null`)으로 유지하며 임의 발명하지 않습니다.
@@ -214,21 +215,38 @@ pub fn host_to_quick_result(
     let mut selected_route_valid = false;
     let mut selected_route_entry: Option<SelectedRouteEntry> = None;
     let mut forged_remote_evidence = false;
+    let mut invalid_target_str: Option<String> = None;
 
     if !snapshot.selected_route.is_null() {
         match serde_json::from_value::<SelectedRouteEntry>(snapshot.selected_route.clone()) {
             Ok(entry) => {
+                let target_ip_parsed = entry.target.parse::<IpAddr>();
                 if entry.remote_connectivity_evidence {
                     // remote_connectivity_evidence=true 같은 위조 상태는 원격 연결 PASS로 고양하지 않고 유효 라우트 컴포넌트 거부 및 한계로 분리
                     forged_remote_evidence = true;
-                    selected_route_valid = false;
-                } else {
+                }
+                if target_ip_parsed.is_err() {
+                    // selected_route.target 원문 IpAddr 파싱 성공을 component 유효 조건에 포함
+                    invalid_target_str = Some(entry.target.clone());
+                }
+                if !entry.remote_connectivity_evidence && target_ip_parsed.is_ok() {
                     selected_route_valid = true;
                     selected_route_entry = Some(entry);
+                } else {
+                    selected_route_valid = false;
                 }
             }
             Err(_) => {
                 selected_route_valid = false;
+                if let Some(target_val) = snapshot
+                    .selected_route
+                    .as_object()
+                    .and_then(|obj| obj.get("target"))
+                    .and_then(|v| v.as_str())
+                    && target_val.parse::<IpAddr>().is_err()
+                {
+                    invalid_target_str = Some(target_val.to_string());
+                }
             }
         }
     }
@@ -246,20 +264,19 @@ pub fn host_to_quick_result(
         });
 
     let mut resolved_ip: Option<String> = None;
-    if let Some(target_str) = candidate_target {
-        if let Ok(route_target_ip) = target_str.trim().parse::<IpAddr>() {
-            if let Ok(ctx_ip) = ctx.target_host.trim().parse::<IpAddr>() {
-                if route_target_ip != ctx_ip {
-                    errors.push(format!(
-                        "선택된 라우트 대상 IP({})가 컨텍스트 대상 IP({})와 일치하지 않습니다 (경로 대상 교차 오염 방지).",
-                        route_target_ip, ctx_ip
-                    ));
-                }
-            }
-            // 유효한 selected_route인 경우에만 resolved_ip로 채택
-            if selected_route_valid {
-                resolved_ip = Some(route_target_ip.to_string());
-            }
+    if let Some(target_str) = candidate_target
+        && let Ok(route_target_ip) = target_str.parse::<IpAddr>()
+    {
+        if let Ok(ctx_ip) = ctx.target_host.trim().parse::<IpAddr>()
+            && route_target_ip != ctx_ip
+        {
+            errors.push(format!(
+                "선택된 라우트 대상 IP({route_target_ip})가 컨텍스트 대상 IP({ctx_ip})와 일치하지 않습니다 (경로 대상 교차 오염 방지)."
+            ));
+        }
+        // 유효한 selected_route인 경우에만 resolved_ip로 채택
+        if selected_route_valid {
+            resolved_ip = Some(route_target_ip.to_string());
         }
     }
 
@@ -297,6 +314,15 @@ pub fn host_to_quick_result(
         push_unique_limitation(
             &mut limitations,
             "selected_route에 remote_connectivity_evidence가 참(true)으로 설정되어 있어 위조된 상태로 간주하고 유효한 라우트 컴포넌트로 승인하지 않았습니다 (원격 연결 증거 채택 불가).".to_string(),
+        );
+    }
+
+    if let Some(bad_target) = invalid_target_str {
+        push_unique_limitation(
+            &mut limitations,
+            format!(
+                "selected_route target.invalid: 대상 주소 '{bad_target}'가 유효한 IP 주소(IpAddr) 형식이 아니어서 유효한 라우트 컴포넌트로 승인하지 않았습니다."
+            ),
         );
     }
 

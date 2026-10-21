@@ -58,7 +58,8 @@ pub const MAX_CONCURRENT_TARGETS: usize = 4;
 pub const MAX_ROWS: usize = 500;
 
 /// Network Quick Check 진단 실행 요청 DTO.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+// 요청은 내부 Rust 타입이며 아직 JSON wire DTO 계약이 아니다.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QuickRunRequest {
     /// 고유 세션 식별자 (비어있을 수 없음).
     pub session_id: String,
@@ -201,19 +202,16 @@ impl QuickProbeBackend for NativeProbeBackend {
             }
 
             let started = Instant::now();
-            let snapshot = tokio::task::spawn_blocking(move || {
-                crate::host::collect_host_snapshot(target)
-            })
-            .await
-            .map_err(|join_err| {
-                vec![format!(
-                    "호스트 스냅샷 동기 수집 spawn_blocking 실패 (JoinError): {join_err}"
-                )]
-            })?;
+            let snapshot =
+                tokio::task::spawn_blocking(move || crate::host::collect_host_snapshot(target))
+                    .await
+                    .map_err(|join_err| {
+                        vec![format!(
+                            "호스트 스냅샷 동기 수집 spawn_blocking 실패 (JoinError): {join_err}"
+                        )]
+                    })?;
 
-            let elapsed_ms = Some(
-                u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
-            );
+            let elapsed_ms = Some(u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX));
             host_to_quick_result(&ctx, &snapshot, elapsed_ms)
         })
     }
@@ -393,9 +391,8 @@ fn verify_backend_result(
                             }
                         }
                         Err(_) => {
-                            mismatches.push(format!(
-                                "유효하지 않은 resolved_ip 형식: '{res_ip_str}'"
-                            ));
+                            mismatches
+                                .push(format!("유효하지 않은 resolved_ip 형식: '{res_ip_str}'"));
                         }
                     }
                 }
@@ -547,12 +544,8 @@ async fn run_single_target(
                         planned_target.target.host
                     );
                     errors.push(err_msg.clone());
-                    let res = make_local_error_result(
-                        &ctx,
-                        QuickFeature::TcpConnect,
-                        None,
-                        err_msg,
-                    );
+                    let res =
+                        make_local_error_result(&ctx, QuickFeature::TcpConnect, None, err_msg);
                     results.push((feature_idx, res));
                     continue;
                 };
@@ -584,8 +577,7 @@ async fn run_single_target(
                         planned_target.target.host
                     );
                     errors.push(err_msg.clone());
-                    let res =
-                        make_local_error_result(&ctx, QuickFeature::IcmpPing, None, err_msg);
+                    let res = make_local_error_result(&ctx, QuickFeature::IcmpPing, None, err_msg);
                     results.push((feature_idx, res));
                     continue;
                 };
@@ -597,8 +589,7 @@ async fn run_single_target(
 
                 counters.icmp_ping.fetch_add(1, Ordering::SeqCst);
 
-                let backend_future =
-                    backend.icmp(ctx.clone(), ip, timeout, Arc::clone(&cancel));
+                let backend_future = backend.icmp(ctx.clone(), ip, timeout, Arc::clone(&cancel));
                 let backend_res = backend_future.await;
 
                 let verified = verify_backend_result(
@@ -618,12 +609,8 @@ async fn run_single_target(
                         planned_target.target.host
                     );
                     errors.push(err_msg.clone());
-                    let res = make_local_error_result(
-                        &ctx,
-                        QuickFeature::LocalNetwork,
-                        None,
-                        err_msg,
-                    );
+                    let res =
+                        make_local_error_result(&ctx, QuickFeature::LocalNetwork, None, err_msg);
                     results.push((feature_idx, res));
                     continue;
                 };

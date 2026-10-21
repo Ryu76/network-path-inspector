@@ -241,7 +241,8 @@ fn test_default_plan_construction() {
     let target = parse_target_pair("127.0.0.1", "80").expect("대상 생성 실패");
     let options = QuickOptions::default();
 
-    let plan = build_quick_plan(&[target.clone()], &options).expect("기본 계획 수립 실패");
+    let plan =
+        build_quick_plan(std::slice::from_ref(&target), &options).expect("기본 계획 수립 실패");
 
     assert_eq!(plan.tcp_timeout_ms, DEFAULT_TCP_TIMEOUT_MS);
     // Ping 선택 시 min(3000, 2000) = 2000ms로 클램프
@@ -296,7 +297,8 @@ fn test_individual_features_selection_and_no_unselected_added() {
             concurrency: 2,
             selected_features: vec![feature],
         };
-        let plan = build_quick_plan(&[target.clone()], &options).expect("단일 기능 계획 수립 실패");
+        let plan = build_quick_plan(std::slice::from_ref(&target), &options)
+            .expect("단일 기능 계획 수립 실패");
         assert_eq!(plan.targets[0].features.len(), 1);
         assert_eq!(plan.targets[0].features[0], feature);
 
@@ -329,7 +331,7 @@ fn test_implicit_vs_detailed_dns_resolution() {
         concurrency: 4,
         selected_features: vec![QuickFeature::TcpConnect],
     };
-    let plan_domain_tcp = build_quick_plan(&[domain_target.clone()], &opt_tcp).unwrap();
+    let plan_domain_tcp = build_quick_plan(std::slice::from_ref(&domain_target), &opt_tcp).unwrap();
     assert!(plan_domain_tcp.targets[0].requires_resolution);
 
     // 2) 도메인 대상 + DnsLookup만 선택 -> requires_resolution: false (상세 기능 자체 조회)
@@ -338,7 +340,7 @@ fn test_implicit_vs_detailed_dns_resolution() {
         concurrency: 4,
         selected_features: vec![QuickFeature::DnsLookup],
     };
-    let plan_domain_dns = build_quick_plan(&[domain_target.clone()], &opt_dns).unwrap();
+    let plan_domain_dns = build_quick_plan(std::slice::from_ref(&domain_target), &opt_dns).unwrap();
     assert!(!plan_domain_dns.targets[0].requires_resolution);
 
     // 3) 도메인 대상 + Traceroute -> requires_resolution: true
@@ -351,7 +353,7 @@ fn test_implicit_vs_detailed_dns_resolution() {
     assert!(plan_domain_trace.targets[0].requires_resolution);
 
     // 4) IP 대상 + TCP Connect -> requires_resolution: false
-    let plan_ip_tcp = build_quick_plan(&[ip_target.clone()], &opt_tcp).unwrap();
+    let plan_ip_tcp = build_quick_plan(std::slice::from_ref(&ip_target), &opt_tcp).unwrap();
     assert!(!plan_ip_tcp.targets[0].requires_resolution);
 
     // 5) IP 대상 + DnsLookup -> requires_resolution: false
@@ -437,7 +439,7 @@ fn test_forged_target_revalidation_in_build_plan() {
         selected_features: vec![QuickFeature::TcpConnect],
     };
     let normal_target = parse_target_pair("127.0.0.1", "80").unwrap();
-    assert!(build_quick_plan(&[normal_target.clone()], &bad_timeout_opt).is_err());
+    assert!(build_quick_plan(std::slice::from_ref(&normal_target), &bad_timeout_opt).is_err());
 
     // 동시성 범위 위조 (0 또는 5)
     let bad_concurrency_opt = QuickOptions {
@@ -492,4 +494,157 @@ fn test_domain_trailing_dot_rejected() {
     assert!(parse_target_pair("example..com", "80").is_err());
     assert!(parse_target_pair("-example.com", "80").is_err());
     assert!(parse_target_pair("example-.com", "80").is_err());
+}
+
+/// 20. 직접 생성된 자격증명 포함 host(포트 443)의 build_quick_plan 검증 시 시크릿 미노출 및 순번 식별 검증.
+#[test]
+fn test_build_quick_plan_credential_in_host_no_secret_reflection_port_443() {
+    let sentinel = "QG2_SYNTHETIC_CREDENTIAL_SENTINEL";
+    let user = "admin";
+    let forged_host = format!("{user}:{sentinel}@example.test");
+    let raw = format!("{forged_host}:443");
+
+    let target = QuickTarget {
+        host: forged_host.clone(),
+        port: 443,
+        raw_input: raw.clone(),
+    };
+
+    let options = QuickOptions::default();
+
+    // 1) 단일 대상 (#1 순번 식별 및 시크릿 미반사)
+    let res = build_quick_plan(std::slice::from_ref(&target), &options);
+    assert!(res.is_err(), "자격증명 포함 호스트가 허용됨");
+    let errs = res.unwrap_err();
+    assert!(!errs.is_empty());
+
+    for err in &errs {
+        assert_eq!(err.line, 0, "build_quick_plan 오류 line은 0이어야 함");
+        assert!(
+            !err.message.contains(sentinel),
+            "에러 메시지에 합성 sentinel이 노출되었습니다: {}",
+            err.message
+        );
+        assert!(
+            !err.message.contains(user),
+            "에러 메시지에 사용자명이 노출되었습니다: {}",
+            err.message
+        );
+        assert!(
+            !err.message.contains(&raw),
+            "에러 메시지에 raw_input이 노출되었습니다: {}",
+            err.message
+        );
+        assert!(
+            err.message.contains("#1"),
+            "에러 메시지에 1-based 대상 순번(#1)이 식별되지 않습니다: {}",
+            err.message
+        );
+    }
+
+    // 2) 다중 대상에서 2번째 대상 오류 시 #2 순번 식별 및 1번째 정상 대상에 영향 없음 검증
+    let normal_target = parse_target_pair("127.0.0.1", "443").unwrap();
+    let multi_res = build_quick_plan(&[normal_target.clone(), target.clone()], &options);
+    assert!(multi_res.is_err());
+    let multi_errs = multi_res.unwrap_err();
+    assert!(
+        multi_errs.iter().any(|e| e.message.contains("#2")),
+        "다중 대상 중 2번째 대상 순번(#2)이 식별되지 않습니다"
+    );
+    for err in &multi_errs {
+        assert!(!err.message.contains(sentinel));
+        assert!(!err.message.contains(user));
+    }
+
+    // 3) URL scheme 포함 호스트(https://user:sentinel@host) 위조 검증
+    let url_host = format!("https://{user}:{sentinel}@example.test");
+    let url_raw = format!("{url_host}:443");
+    let url_target = QuickTarget {
+        host: url_host.clone(),
+        port: 443,
+        raw_input: url_raw.clone(),
+    };
+    let url_res = build_quick_plan(std::slice::from_ref(&url_target), &options);
+    assert!(url_res.is_err());
+    for err in &url_res.unwrap_err() {
+        assert!(!err.message.contains(sentinel));
+        assert!(!err.message.contains(user));
+        assert!(!err.message.contains(&url_raw));
+    }
+
+    // 원본 target 객체들의 불변(no mutation) 검증
+    assert_eq!(target.host, forged_host);
+    assert_eq!(target.port, 443);
+    assert_eq!(target.raw_input, raw);
+    assert_eq!(url_target.host, url_host);
+    assert_eq!(url_target.port, 443);
+    assert_eq!(url_target.raw_input, url_raw);
+    assert_eq!(normal_target.host, "127.0.0.1");
+}
+
+/// 21. 직접 생성된 자격증명 포함 host(포트 0)의 build_quick_plan 포트/호스트 오류 시 시크릿 미노출 및 순번 식별 검증.
+#[test]
+fn test_build_quick_plan_credential_in_host_no_secret_reflection_port_0() {
+    let sentinel = "QG2_SYNTHETIC_CREDENTIAL_SENTINEL";
+    let user = "admin";
+    let forged_host = format!("{user}:{sentinel}@example.test");
+    let raw = format!("{forged_host}:0");
+
+    let target = QuickTarget {
+        host: forged_host.clone(),
+        port: 0,
+        raw_input: raw.clone(),
+    };
+
+    let options = QuickOptions::default();
+
+    let res = build_quick_plan(std::slice::from_ref(&target), &options);
+    assert!(res.is_err(), "포트 0 및 자격증명 호스트가 허용됨");
+    let errs = res.unwrap_err();
+    assert!(
+        errs.len() >= 2,
+        "포트 범위 오류와 호스트 유효성 오류가 모두 수집되어야 함"
+    );
+
+    let mut found_port_err = false;
+    let mut found_host_err = false;
+
+    for err in &errs {
+        assert_eq!(err.line, 0, "build_quick_plan 오류 line은 0이어야 함");
+        assert!(
+            !err.message.contains(sentinel),
+            "에러 메시지에 합성 sentinel이 노출되었습니다: {}",
+            err.message
+        );
+        assert!(
+            !err.message.contains(user),
+            "에러 메시지에 사용자명이 노출되었습니다: {}",
+            err.message
+        );
+        assert!(
+            !err.message.contains(&raw),
+            "에러 메시지에 raw_input이 노출되었습니다: {}",
+            err.message
+        );
+        assert!(
+            err.message.contains("#1"),
+            "에러 메시지에 대상 순번(#1)이 식별되지 않습니다: {}",
+            err.message
+        );
+
+        if err.message.contains("포트 번호(0)가 유효 범위") {
+            found_port_err = true;
+        }
+        if err.message.contains("호스트가 유효하지 않습니다") {
+            found_host_err = true;
+        }
+    }
+
+    assert!(found_port_err, "포트 0 범위 오류 메시지가 존재해야 함");
+    assert!(found_host_err, "호스트 오류 메시지가 존재해야 함");
+
+    // 원본 target 객체의 불변(no mutation) 검증
+    assert_eq!(target.host, forged_host);
+    assert_eq!(target.port, 0);
+    assert_eq!(target.raw_input, raw);
 }
