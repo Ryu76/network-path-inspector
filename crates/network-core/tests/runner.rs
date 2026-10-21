@@ -7,10 +7,10 @@
 //! - 실제 루프백 대상 테스트(IPv4/IPv6)는 `#[ignore = "실제 루프백 검증: 부모 명시 실행"]`으로
 //!   분리하여 부모의 명시적 요청 시에만 실행되도록 격리합니다.
 
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use network_core::measurements::{host_to_quick_result, icmp_to_quick_result};
@@ -19,7 +19,7 @@ use network_core::quick::{
 };
 use network_core::runner::{
     DEFAULT_MAX_RESULT_BYTES, MIN_RESULT_BYTES, NativeProbeBackend, ProbeCounts, ProbeFuture,
-    QuickProbeBackend, QuickRunReport, QuickRunRequest, run_quick,
+    QuickProbeBackend, QuickRunRequest, run_quick,
 };
 use network_core::targets::{QuickOptions, QuickTarget};
 use network_core::{HostSnapshot, IcmpMeasurement, TcpMeasurement};
@@ -59,10 +59,6 @@ impl MockProbeBackend {
 
     fn set_tcp_responder(&self, responder: TcpResponder) {
         self.state.lock().unwrap().tcp_responder = Some(responder);
-    }
-
-    fn set_icmp_responder(&self, responder: IcmpResponder) {
-        self.state.lock().unwrap().icmp_responder = Some(responder);
     }
 
     fn set_on_tcp_call(&self, hook: Arc<dyn Fn() + Send + Sync>) {
@@ -698,7 +694,10 @@ async fn test_12_live_loopback_ipv6_tcp_connect_and_ping() {
     assert_eq!(tcp_res.status, QuickStatus::PASS);
     assert_eq!(tcp_res.evidence_level, EvidenceLevel::OBSERVED);
     assert_eq!(tcp_res.details["outcome"], "CONNECTED");
-    assert_eq!(tcp_res.details["raw_measurement"]["application_bytes_sent"], 0);
+    assert_eq!(
+        tcp_res.details["raw_measurement"]["application_bytes_sent"],
+        0
+    );
 
     let icmp_res = &report.results[1];
     assert_eq!(icmp_res.feature, QuickFeature::IcmpPing);

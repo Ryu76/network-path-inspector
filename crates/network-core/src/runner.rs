@@ -227,6 +227,18 @@ struct SharedInvocationCounters {
     icmp_traceroute: AtomicUsize,
 }
 
+/// 단일 대상 프로브 실행에 필요한 공통 컨텍스트 및 백엔드 의존성.
+struct SingleTargetExecutionContext {
+    backend: Arc<dyn QuickProbeBackend>,
+    cancel: Arc<AtomicBool>,
+    session_id: String,
+    timestamp_iso8601: Option<String>,
+    source_host: Option<String>,
+    tcp_timeout_ms: u64,
+    icmp_timeout_ms: Option<u64>,
+    counters: Arc<SharedInvocationCounters>,
+}
+
 /// 단일 대상 작업 실행 결과.
 struct SingleTargetOutput {
     target_idx: usize,
@@ -257,10 +269,10 @@ fn pre_validate_request(request: &QuickRunRequest) -> Result<QuickPlan, Vec<Stri
         }
     }
 
-    if let Some(ref sh) = request.source_host {
-        if sh.trim().is_empty() {
-            errors.push("source_host는 비어있을 수 없습니다.".to_string());
-        }
+    if let Some(ref sh) = request.source_host
+        && sh.trim().is_empty()
+    {
+        errors.push("source_host는 비어있을 수 없습니다.".to_string());
     }
 
     if request.targets.len() > MAX_TARGETS {
@@ -380,20 +392,19 @@ fn verify_backend_result(
             }
 
             // resolved_ip 교차 오염 검증: target IP가 있는 경우 수치 비교
-            if let Some(ref res_ip_str) = res.resolved_ip {
-                if let Some(exp_ip) = expected_ip {
-                    match res_ip_str.trim().parse::<IpAddr>() {
-                        Ok(parsed_ip) => {
-                            if parsed_ip != exp_ip {
-                                mismatches.push(format!(
-                                    "resolved_ip 교차 오염 감지 (기대: '{exp_ip}', 실제: '{parsed_ip}')"
-                                ));
-                            }
+            if let Some(ref res_ip_str) = res.resolved_ip
+                && let Some(exp_ip) = expected_ip
+            {
+                match res_ip_str.trim().parse::<IpAddr>() {
+                    Ok(parsed_ip) => {
+                        if parsed_ip != exp_ip {
+                            mismatches.push(format!(
+                                "resolved_ip 교차 오염 감지 (기대: '{exp_ip}', 실제: '{parsed_ip}')"
+                            ));
                         }
-                        Err(_) => {
-                            mismatches
-                                .push(format!("유효하지 않은 resolved_ip 형식: '{res_ip_str}'"));
-                        }
+                    }
+                    Err(_) => {
+                        mismatches.push(format!("유효하지 않은 resolved_ip 형식: '{res_ip_str}'"));
                     }
                 }
             }
@@ -508,14 +519,7 @@ fn build_pre_cancelled_report(
 async fn run_single_target(
     target_idx: usize,
     planned_target: crate::targets::PlannedTarget,
-    backend: Arc<dyn QuickProbeBackend>,
-    cancel: Arc<AtomicBool>,
-    session_id: String,
-    timestamp_iso8601: Option<String>,
-    source_host: Option<String>,
-    tcp_timeout_ms: u64,
-    icmp_timeout_ms: Option<u64>,
-    counters: Arc<SharedInvocationCounters>,
+    exec_ctx: Arc<SingleTargetExecutionContext>,
 ) -> SingleTargetOutput {
     let mut results = Vec::new();
     let mut errors = Vec::new();
@@ -524,14 +528,14 @@ async fn run_single_target(
 
     for (feature_idx, feature) in planned_target.features.iter().enumerate() {
         // 각 기능 실행 전 취소 여부 확인: 중도 취소 시 미시작 기능은 실행하지 않음
-        if cancel.load(Ordering::SeqCst) {
+        if exec_ctx.cancel.load(Ordering::SeqCst) {
             break;
         }
 
         let ctx = QuickContext {
-            session_id: session_id.clone(),
-            timestamp_iso8601: timestamp_iso8601.clone(),
-            source_host: source_host.clone(),
+            session_id: exec_ctx.session_id.clone(),
+            timestamp_iso8601: exec_ctx.timestamp_iso8601.clone(),
+            source_host: exec_ctx.source_host.clone(),
             target_host: planned_target.target.host.clone(),
             target_port: planned_target.target.port,
         };
@@ -551,13 +555,17 @@ async fn run_single_target(
                 };
 
                 let socket_addr = SocketAddr::new(ip, planned_target.target.port);
-                let timeout = Duration::from_millis(tcp_timeout_ms);
+                let timeout = Duration::from_millis(exec_ctx.tcp_timeout_ms);
 
                 // 백엔드 메소드를 실제 호출하는 순간에만 카운터 증가
-                counters.tcp_connect.fetch_add(1, Ordering::SeqCst);
+                exec_ctx.counters.tcp_connect.fetch_add(1, Ordering::SeqCst);
 
-                let backend_future =
-                    backend.tcp(ctx.clone(), socket_addr, timeout, Arc::clone(&cancel));
+                let backend_future = exec_ctx.backend.tcp(
+                    ctx.clone(),
+                    socket_addr,
+                    timeout,
+                    Arc::clone(&exec_ctx.cancel),
+                );
                 let backend_res = backend_future.await;
 
                 let verified = verify_backend_result(
@@ -582,14 +590,17 @@ async fn run_single_target(
                     continue;
                 };
 
-                let timeout_ms = icmp_timeout_ms.unwrap_or_else(|| {
-                    std::cmp::min(tcp_timeout_ms, crate::targets::MAX_ICMP_TIMEOUT_MS)
+                let timeout_ms = exec_ctx.icmp_timeout_ms.unwrap_or_else(|| {
+                    std::cmp::min(exec_ctx.tcp_timeout_ms, crate::targets::MAX_ICMP_TIMEOUT_MS)
                 });
                 let timeout = Duration::from_millis(timeout_ms);
 
-                counters.icmp_ping.fetch_add(1, Ordering::SeqCst);
+                exec_ctx.counters.icmp_ping.fetch_add(1, Ordering::SeqCst);
 
-                let backend_future = backend.icmp(ctx.clone(), ip, timeout, Arc::clone(&cancel));
+                let backend_future =
+                    exec_ctx
+                        .backend
+                        .icmp(ctx.clone(), ip, timeout, Arc::clone(&exec_ctx.cancel));
                 let backend_res = backend_future.await;
 
                 let verified = verify_backend_result(
@@ -615,9 +626,15 @@ async fn run_single_target(
                     continue;
                 };
 
-                counters.local_network.fetch_add(1, Ordering::SeqCst);
+                exec_ctx
+                    .counters
+                    .local_network
+                    .fetch_add(1, Ordering::SeqCst);
 
-                let backend_future = backend.host(ctx.clone(), ip, Arc::clone(&cancel));
+                let backend_future =
+                    exec_ctx
+                        .backend
+                        .host(ctx.clone(), ip, Arc::clone(&exec_ctx.cancel));
                 let backend_res = backend_future.await;
 
                 let verified = verify_backend_result(
@@ -719,6 +736,17 @@ pub async fn run_quick(
     let targets_completed = Arc::new(AtomicUsize::new(0));
     let invocation_counters = Arc::new(SharedInvocationCounters::default());
 
+    let exec_ctx = Arc::new(SingleTargetExecutionContext {
+        backend: Arc::clone(&backend),
+        cancel: Arc::clone(&cancel),
+        session_id: request.session_id.clone(),
+        timestamp_iso8601: request.timestamp_iso8601.clone(),
+        source_host: request.source_host.clone(),
+        tcp_timeout_ms: plan.tcp_timeout_ms,
+        icmp_timeout_ms: plan.icmp_timeout_ms,
+        counters: Arc::clone(&invocation_counters),
+    });
+
     let mut global_errors = Vec::new();
     let mut task_outputs = Vec::new();
 
@@ -736,36 +764,17 @@ pub async fn run_quick(
             if let Some((target_idx, planned_target)) = target_iter.next() {
                 targets_started.fetch_add(1, Ordering::SeqCst);
 
-                let backend_clone = Arc::clone(&backend);
-                let cancel_clone = Arc::clone(&cancel);
                 let active_counter = Arc::clone(&active_targets);
                 let max_active = Arc::clone(&max_active_observed);
                 let completed_counter = Arc::clone(&targets_completed);
-                let invocations_clone = Arc::clone(&invocation_counters);
-
-                let session_id = request.session_id.clone();
-                let timestamp_iso8601 = request.timestamp_iso8601.clone();
-                let source_host = request.source_host.clone();
-                let tcp_timeout = plan.tcp_timeout_ms;
-                let icmp_timeout = plan.icmp_timeout_ms;
+                let exec_ctx_clone = Arc::clone(&exec_ctx);
 
                 join_set.spawn(async move {
                     let cur = active_counter.fetch_add(1, Ordering::SeqCst) + 1;
                     max_active.fetch_max(cur, Ordering::SeqCst);
 
-                    let output = run_single_target(
-                        target_idx,
-                        planned_target,
-                        backend_clone,
-                        cancel_clone,
-                        session_id,
-                        timestamp_iso8601,
-                        source_host,
-                        tcp_timeout,
-                        icmp_timeout,
-                        invocations_clone,
-                    )
-                    .await;
+                    let output =
+                        run_single_target(target_idx, planned_target, exec_ctx_clone).await;
 
                     active_counter.fetch_sub(1, Ordering::SeqCst);
                     completed_counter.fetch_add(1, Ordering::SeqCst);
