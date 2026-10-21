@@ -1267,13 +1267,8 @@ fn test_real_localhost_helper_process_isolation() {
     // 부모가 main.rs에 helper 실행 플래그를 연결한 후 NPI_TEST_HELPER_EXE 환경변수로
     // 지정한 실제 제품 바이너리 경로(테스트 실행 파일 아님)로 localhost의 하위 프로세스 격리를 시험한다.
     // 외부 도메인을 사용하지 않으며, 부모가 추후 main/helper를 연결하고 명시적으로 실행한다.
-    let exe_var = match std::env::var("NPI_TEST_HELPER_EXE") {
-        Ok(val) => val,
-        Err(_) => {
-            eprintln!("NPI_TEST_HELPER_EXE 미설정: 부모가 제품 바이너리 경로를 제공해야 격리 시험 가능");
-            return;
-        }
-    };
+    let exe_var = std::env::var("NPI_TEST_HELPER_EXE")
+        .expect("명시 real 시험에는 NPI_TEST_HELPER_EXE 절대 경로가 필요하며 미설정은 성공이 아니다");
     let exe_path = Path::new(&exe_var);
     assert!(
         exe_path.is_absolute(),
