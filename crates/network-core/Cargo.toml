@@ -12,3 +12,6 @@ serde_json = { workspace = true }
 
 # 기존 공통 프로브에 이미 잠긴 Tokio를 실행 스케줄러에서 직접 재사용한다.
 tokio = { version = "=1.52.3", features = ["rt", "net", "time", "macros", "sync"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Pipes", "Win32_System_SystemInformation"] }

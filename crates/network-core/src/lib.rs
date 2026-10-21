@@ -40,3 +40,5 @@ pub use tcp::{TcpMeasurement, TcpOutcome, classify_tcp_error, connect_once};
 pub mod measurements;
 pub mod runner;
 pub mod targets;
+
+pub mod traceroute;
