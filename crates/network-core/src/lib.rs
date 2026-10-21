@@ -29,9 +29,9 @@ pub use host::{
 };
 pub use icmp::{IcmpMeasurement, ping_once};
 pub use quick::{
-    validate_quick_result, validate_rfc3339_timestamp, EVIDENCE_VALUES, EVIDENCE_VALUES_COUNT,
-    EvidenceLevel, FEATURE_VALUES, FEATURE_VALUES_COUNT, QUICK_PRODUCT_NAME, QUICK_SCHEMA_VERSION,
-    QuickContext, QuickFeature, QuickResult, QuickStatus, STATUS_VALUES, STATUS_VALUES_COUNT,
-    tcp_to_quick_result,
+    EVIDENCE_VALUES, EVIDENCE_VALUES_COUNT, EvidenceLevel, FEATURE_VALUES, FEATURE_VALUES_COUNT,
+    QUICK_PRODUCT_NAME, QUICK_SCHEMA_VERSION, QuickContext, QuickFeature, QuickResult, QuickStatus,
+    STATUS_VALUES, STATUS_VALUES_COUNT, tcp_to_quick_result, validate_quick_result,
+    validate_rfc3339_timestamp,
 };
 pub use tcp::{TcpMeasurement, TcpOutcome, classify_tcp_error, connect_once};

@@ -109,7 +109,9 @@ pub fn validate_rfc3339_timestamp(s: &str) -> Result<(), String> {
         return Err("타임스탬프는 ASCII 문자열이어야 합니다.".to_string());
     }
     if s.len() < 20 {
-        return Err("타임스탬프 길이가 너무 짧습니다 (최소 YYYY-MM-DDTHH:MM:SSZ 형식 필요).".to_string());
+        return Err(
+            "타임스탬프 길이가 너무 짧습니다 (최소 YYYY-MM-DDTHH:MM:SSZ 형식 필요).".to_string(),
+        );
     }
 
     let bytes = s.as_bytes();
@@ -117,10 +119,19 @@ pub fn validate_rfc3339_timestamp(s: &str) -> Result<(), String> {
         return Err("날짜 구분자('-')가 올바르지 않습니다.".to_string());
     }
 
+    if !bytes[0..4].iter().all(|b| b.is_ascii_digit()) {
+        return Err("연도는 4자리 숫자여야 합니다.".to_string());
+    }
     let year: u32 = s[0..4]
         .parse()
         .map_err(|_| "연도는 4자리 숫자여야 합니다.".to_string())?;
+    if !(1..=9999).contains(&year) {
+        return Err("연도는 0001..=9999 범위여야 합니다.".to_string());
+    }
 
+    if !bytes[5..7].iter().all(|b| b.is_ascii_digit()) {
+        return Err("월은 2자리 숫자여야 합니다.".to_string());
+    }
     let month: u32 = s[5..7]
         .parse()
         .map_err(|_| "월은 2자리 숫자여야 합니다.".to_string())?;
@@ -128,11 +139,14 @@ pub fn validate_rfc3339_timestamp(s: &str) -> Result<(), String> {
         return Err("월은 01..=12 범위여야 합니다.".to_string());
     }
 
+    if !bytes[8..10].iter().all(|b| b.is_ascii_digit()) {
+        return Err("일은 2자리 숫자여야 합니다.".to_string());
+    }
     let day: u32 = s[8..10]
         .parse()
         .map_err(|_| "일은 2자리 숫자여야 합니다.".to_string())?;
 
-    let is_leap = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+    let is_leap = (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400);
     let max_day = match month {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
         4 | 6 | 9 | 11 => 30,
@@ -161,6 +175,9 @@ pub fn validate_rfc3339_timestamp(s: &str) -> Result<(), String> {
         return Err("시간 구분자(':')가 올바르지 않습니다.".to_string());
     }
 
+    if !bytes[11..13].iter().all(|b| b.is_ascii_digit()) {
+        return Err("시는 2자리 숫자여야 합니다.".to_string());
+    }
     let hour: u32 = s[11..13]
         .parse()
         .map_err(|_| "시는 2자리 숫자여야 합니다.".to_string())?;
@@ -168,6 +185,9 @@ pub fn validate_rfc3339_timestamp(s: &str) -> Result<(), String> {
         return Err("시는 00..=23 범위여야 합니다.".to_string());
     }
 
+    if !bytes[14..16].iter().all(|b| b.is_ascii_digit()) {
+        return Err("분은 2자리 숫자여야 합니다.".to_string());
+    }
     let minute: u32 = s[14..16]
         .parse()
         .map_err(|_| "분은 2자리 숫자여야 합니다.".to_string())?;
@@ -175,6 +195,9 @@ pub fn validate_rfc3339_timestamp(s: &str) -> Result<(), String> {
         return Err("분은 00..=59 범위여야 합니다.".to_string());
     }
 
+    if !bytes[17..19].iter().all(|b| b.is_ascii_digit()) {
+        return Err("초는 2자리 숫자여야 합니다.".to_string());
+    }
     let second: u32 = s[17..19]
         .parse()
         .map_err(|_| "초는 2자리 숫자여야 합니다.".to_string())?;
@@ -200,6 +223,13 @@ pub fn validate_rfc3339_timestamp(s: &str) -> Result<(), String> {
     } else if rest.starts_with('+') || rest.starts_with('-') {
         if rest.len() != 6 || rest.as_bytes()[3] != b':' {
             return Err("시간대 오프셋은 ±HH:MM 형식이어야 합니다.".to_string());
+        }
+        let rest_bytes = rest.as_bytes();
+        if !rest_bytes[1..3].iter().all(|b| b.is_ascii_digit()) {
+            return Err("시간대 오프셋 시는 2자리 숫자여야 합니다.".to_string());
+        }
+        if !rest_bytes[4..6].iter().all(|b| b.is_ascii_digit()) {
+            return Err("시간대 오프셋 분은 2자리 숫자여야 합니다.".to_string());
         }
         let tz_h: u32 = rest[1..3]
             .parse()
@@ -259,9 +289,9 @@ impl<'de> Deserialize<'de> for QuickResult {
         D: Deserializer<'de>,
     {
         let value = serde_json::Value::deserialize(deserializer)?;
-        let obj = value.as_object().ok_or_else(|| {
-            DeError::custom("QuickResult는 JSON 객체여야 합니다.")
-        })?;
+        let obj = value
+            .as_object()
+            .ok_or_else(|| DeError::custom("QuickResult는 JSON 객체여야 합니다."))?;
 
         const REQUIRED_KEYS: [&str; 14] = [
             "schema_version",
@@ -283,38 +313,42 @@ impl<'de> Deserialize<'de> for QuickResult {
         // 알 수 없는 필드 거부 (deny_unknown_fields)
         for key in obj.keys() {
             if !REQUIRED_KEYS.contains(&key.as_str()) {
-                return Err(DeError::custom(format!("알 수 없는 필드가 존재합니다: '{key}'")));
+                return Err(DeError::custom(format!(
+                    "알 수 없는 필드가 존재합니다: '{key}'"
+                )));
             }
         }
 
         // 필수 필드 존재 확인 (nullable 필드 포함: 키 부재 거부, explicit null은 허용)
         for &key in &REQUIRED_KEYS {
             if !obj.contains_key(key) {
-                return Err(DeError::custom(format!("필수 필드가 누락되었습니다: '{key}'")));
+                return Err(DeError::custom(format!(
+                    "필수 필드가 누락되었습니다: '{key}'"
+                )));
             }
         }
 
-        let schema_version_str = obj["schema_version"].as_str().ok_or_else(|| {
-            DeError::custom("schema_version은 문자열이어야 합니다.")
-        })?;
+        let schema_version_str = obj["schema_version"]
+            .as_str()
+            .ok_or_else(|| DeError::custom("schema_version은 문자열이어야 합니다."))?;
         if schema_version_str != QUICK_SCHEMA_VERSION {
             return Err(DeError::custom(format!(
                 "schema_version은 고정값 '{QUICK_SCHEMA_VERSION}'이어야 합니다."
             )));
         }
 
-        let product_str = obj["product"].as_str().ok_or_else(|| {
-            DeError::custom("product는 문자열이어야 합니다.")
-        })?;
+        let product_str = obj["product"]
+            .as_str()
+            .ok_or_else(|| DeError::custom("product는 문자열이어야 합니다."))?;
         if product_str != QUICK_PRODUCT_NAME {
             return Err(DeError::custom(format!(
                 "product는 고정값 '{QUICK_PRODUCT_NAME}'이어야 합니다."
             )));
         }
 
-        let session_id_str = obj["session_id"].as_str().ok_or_else(|| {
-            DeError::custom("session_id는 문자열이어야 합니다.")
-        })?;
+        let session_id_str = obj["session_id"]
+            .as_str()
+            .ok_or_else(|| DeError::custom("session_id는 문자열이어야 합니다."))?;
         if session_id_str.trim().is_empty() {
             return Err(DeError::custom("session_id는 비어있을 수 없습니다."));
         }
@@ -325,7 +359,11 @@ impl<'de> Deserialize<'de> for QuickResult {
                 validate_rfc3339_timestamp(s).map_err(DeError::custom)?;
                 Some(s.clone())
             }
-            _ => return Err(DeError::custom("timestamp_iso8601는 문자열 또는 null이어야 합니다.")),
+            _ => {
+                return Err(DeError::custom(
+                    "timestamp_iso8601는 문자열 또는 null이어야 합니다.",
+                ));
+            }
         };
 
         let source_host = match &obj["source_host"] {
@@ -336,12 +374,16 @@ impl<'de> Deserialize<'de> for QuickResult {
                 }
                 Some(s.clone())
             }
-            _ => return Err(DeError::custom("source_host는 문자열 또는 null이어야 합니다.")),
+            _ => {
+                return Err(DeError::custom(
+                    "source_host는 문자열 또는 null이어야 합니다.",
+                ));
+            }
         };
 
-        let target_host_str = obj["target_host"].as_str().ok_or_else(|| {
-            DeError::custom("target_host는 문자열이어야 합니다.")
-        })?;
+        let target_host_str = obj["target_host"]
+            .as_str()
+            .ok_or_else(|| DeError::custom("target_host는 문자열이어야 합니다."))?;
         if target_host_str.trim().is_empty() {
             return Err(DeError::custom("target_host는 비어있을 수 없습니다."));
         }
@@ -357,12 +399,16 @@ impl<'de> Deserialize<'de> for QuickResult {
                 })?;
                 Some(s.clone())
             }
-            _ => return Err(DeError::custom("resolved_ip는 문자열 또는 null이어야 합니다.")),
+            _ => {
+                return Err(DeError::custom(
+                    "resolved_ip는 문자열 또는 null이어야 합니다.",
+                ));
+            }
         };
 
-        let target_port_val = obj["target_port"].as_u64().ok_or_else(|| {
-            DeError::custom("target_port는 1..=65535 범위의 정수여야 합니다.")
-        })?;
+        let target_port_val = obj["target_port"]
+            .as_u64()
+            .ok_or_else(|| DeError::custom("target_port는 1..=65535 범위의 정수여야 합니다."))?;
         if !(1..=65535).contains(&target_port_val) {
             return Err(DeError::custom(
                 "target_port는 1..=65535 범위여야 합니다 (포트 0 금지).",
@@ -390,9 +436,9 @@ impl<'de> Deserialize<'de> for QuickResult {
         let os_error_code = match &obj["os_error_code"] {
             serde_json::Value::Null => None,
             serde_json::Value::Number(n) => {
-                let code_i64 = n.as_i64().ok_or_else(|| {
-                    DeError::custom("os_error_code는 정수(i32)여야 합니다.")
-                })?;
+                let code_i64 = n
+                    .as_i64()
+                    .ok_or_else(|| DeError::custom("os_error_code는 정수(i32)여야 합니다."))?;
                 if code_i64 < (i32::MIN as i64) || code_i64 > (i32::MAX as i64) {
                     return Err(DeError::custom(
                         "os_error_code는 32비트 부호 있는 정수(i32) 범위여야 합니다.",
@@ -400,40 +446,53 @@ impl<'de> Deserialize<'de> for QuickResult {
                 }
                 Some(code_i64 as i32)
             }
-            _ => return Err(DeError::custom("os_error_code는 정수 또는 null이어야 합니다.")),
+            _ => {
+                return Err(DeError::custom(
+                    "os_error_code는 정수 또는 null이어야 합니다.",
+                ));
+            }
         };
 
-        let details_obj = obj["details"].as_object().ok_or_else(|| {
-            DeError::custom("details는 객체여야 합니다.")
-        })?;
+        let details_obj = obj["details"]
+            .as_object()
+            .ok_or_else(|| DeError::custom("details는 객체여야 합니다."))?;
         const DETAILS_REQUIRED: [&str; 3] = ["outcome", "limitations", "raw_measurement"];
         for k in details_obj.keys() {
             if !DETAILS_REQUIRED.contains(&k.as_str()) {
-                return Err(DeError::custom(format!("details에 알 수 없는 필드가 존재합니다: '{k}'")));
+                return Err(DeError::custom(format!(
+                    "details에 알 수 없는 필드가 존재합니다: '{k}'"
+                )));
             }
         }
         for &k in &DETAILS_REQUIRED {
             if !details_obj.contains_key(k) {
-                return Err(DeError::custom(format!("details에 필수 필드가 누락되었습니다: '{k}'")));
+                return Err(DeError::custom(format!(
+                    "details에 필수 필드가 누락되었습니다: '{k}'"
+                )));
             }
         }
         if !details_obj["outcome"].is_string() {
             return Err(DeError::custom("details.outcome은 문자열이어야 합니다."));
         }
-        let limitations_arr = details_obj["limitations"].as_array().ok_or_else(|| {
-            DeError::custom("details.limitations는 문자열 배열이어야 합니다.")
-        })?;
+        let limitations_arr = details_obj["limitations"]
+            .as_array()
+            .ok_or_else(|| DeError::custom("details.limitations는 문자열 배열이어야 합니다."))?;
         for elem in limitations_arr {
             if !elem.is_string() {
-                return Err(DeError::custom("details.limitations의 모든 요소는 문자열이어야 합니다."));
+                return Err(DeError::custom(
+                    "details.limitations의 모든 요소는 문자열이어야 합니다.",
+                ));
             }
         }
         if !details_obj["raw_measurement"].is_object() {
-            return Err(DeError::custom("details.raw_measurement는 객체여야 합니다."));
+            return Err(DeError::custom(
+                "details.raw_measurement는 객체여야 합니다.",
+            ));
         }
 
-        let evidence_level: EvidenceLevel = serde_json::from_value(obj["evidence_level"].clone())
-            .map_err(|err| DeError::custom(format!("evidence_level 역직렬화 실패: {err}")))?;
+        let evidence_level: EvidenceLevel =
+            serde_json::from_value(obj["evidence_level"].clone())
+                .map_err(|err| DeError::custom(format!("evidence_level 역직렬화 실패: {err}")))?;
 
         Ok(QuickResult {
             schema_version: schema_version_str.to_string(),
@@ -487,10 +546,10 @@ pub fn validate_quick_result(result: &QuickResult) -> Result<(), Vec<String>> {
             errors.push(format!("timestamp_iso8601 형식 오류: {err}"));
         }
     }
-    if let Some(ref sh) = result.source_host {
-        if sh.trim().is_empty() {
-            errors.push("source_host는 비어있을 수 없습니다.".to_string());
-        }
+    if let Some(ref sh) = result.source_host
+        && sh.trim().is_empty()
+    {
+        errors.push("source_host는 비어있을 수 없습니다.".to_string());
     }
     if let Some(ref ip_str) = result.resolved_ip {
         if ip_str.trim().is_empty() {
@@ -512,16 +571,18 @@ pub fn validate_quick_result(result: &QuickResult) -> Result<(), Vec<String>> {
                 errors.push(format!("details 필수 필드가 누락되었습니다: '{k}'"));
             }
         }
-        if let Some(outcome) = details_obj.get("outcome") {
-            if !outcome.is_string() {
-                errors.push("details.outcome은 문자열이어야 합니다.".to_string());
-            }
+        if let Some(outcome) = details_obj.get("outcome")
+            && !outcome.is_string()
+        {
+            errors.push("details.outcome은 문자열이어야 합니다.".to_string());
         }
         if let Some(limitations) = details_obj.get("limitations") {
             if let Some(arr) = limitations.as_array() {
                 for item in arr {
                     if !item.is_string() {
-                        errors.push("details.limitations의 모든 항목은 문자열이어야 합니다.".to_string());
+                        errors.push(
+                            "details.limitations의 모든 항목은 문자열이어야 합니다.".to_string(),
+                        );
                         break;
                     }
                 }
@@ -529,10 +590,10 @@ pub fn validate_quick_result(result: &QuickResult) -> Result<(), Vec<String>> {
                 errors.push("details.limitations는 배열이어야 합니다.".to_string());
             }
         }
-        if let Some(raw) = details_obj.get("raw_measurement") {
-            if !raw.is_object() {
-                errors.push("details.raw_measurement는 객체여야 합니다.".to_string());
-            }
+        if let Some(raw) = details_obj.get("raw_measurement")
+            && !raw.is_object()
+        {
+            errors.push("details.raw_measurement는 객체여야 합니다.".to_string());
         }
     } else {
         errors.push("details는 객체여야 합니다.".to_string());
@@ -577,7 +638,9 @@ pub fn tcp_to_quick_result(
     if ctx.target_port == 0 {
         errors.push("target_port는 0일 수 없습니다 (유효 범위: 1..=65535).".to_string());
     }
-    if let Some(ts) = &ctx.timestamp_iso8601 && ts.trim().is_empty() {
+    if let Some(ts) = &ctx.timestamp_iso8601
+        && ts.trim().is_empty()
+    {
         errors.push("timestamp_iso8601는 비어있을 수 없습니다.".to_string());
     } else if let Some(ts) = &ctx.timestamp_iso8601 {
         match validate_rfc3339_timestamp(ts) {
@@ -585,7 +648,9 @@ pub fn tcp_to_quick_result(
             Err(err) => errors.push(format!("timestamp_iso8601 형식 오류: {err}")),
         }
     }
-    if let Some(sh) = &ctx.source_host && sh.trim().is_empty() {
+    if let Some(sh) = &ctx.source_host
+        && sh.trim().is_empty()
+    {
         errors.push("source_host는 비어있을 수 없습니다.".to_string());
     }
 
@@ -602,14 +667,14 @@ pub fn tcp_to_quick_result(
         }
 
         // 컨텍스트 target_host가 IP literal인 경우 numeric IpAddr와 측정 peer IP 일치 검증
-        if let Ok(ctx_ip) = ctx.target_host.trim().parse::<IpAddr>() {
-            if ctx_ip != socket_addr.ip() {
-                errors.push(format!(
-                    "측정 대상 IP({})가 컨텍스트 대상 IP({})와 일치하지 않습니다 (IP 불일치 방지).",
-                    socket_addr.ip(),
-                    ctx_ip
-                ));
-            }
+        if let Ok(ctx_ip) = ctx.target_host.trim().parse::<IpAddr>()
+            && ctx_ip != socket_addr.ip()
+        {
+            errors.push(format!(
+                "측정 대상 IP({})가 컨텍스트 대상 IP({})와 일치하지 않습니다 (IP 불일치 방지).",
+                socket_addr.ip(),
+                ctx_ip
+            ));
         }
     }
 
@@ -655,6 +720,6 @@ pub fn tcp_to_quick_result(
         evidence_level,
     };
 
-    validate_quick_result(&res).map_err(|errs| errs)?;
+    validate_quick_result(&res)?;
     Ok(res)
 }

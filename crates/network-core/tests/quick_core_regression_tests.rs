@@ -10,9 +10,9 @@ use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use network_core::{
-    classify_tcp_error, collect_host_snapshot, connect_once, ping_once, tcp_to_quick_result,
-    validate_quick_result, validate_rfc3339_timestamp, EvidenceLevel, QuickContext, QuickFeature,
-    QuickResult, QuickStatus, TcpMeasurement, TcpOutcome,
+    EvidenceLevel, QuickContext, QuickFeature, QuickResult, QuickStatus, TcpMeasurement,
+    TcpOutcome, classify_tcp_error, collect_host_snapshot, connect_once, ping_once,
+    tcp_to_quick_result, validate_quick_result, validate_rfc3339_timestamp,
 };
 use serde_json::Value;
 
@@ -84,7 +84,11 @@ fn tcp_adapter_all_outcomes_mapped_correctly() {
         // CANCELLED는 사용자 취소이며 절대 FAIL로 위장하지 않고 UNKNOWN / UNKNOWN
         ("CANCELLED", QuickStatus::UNKNOWN, EvidenceLevel::UNKNOWN),
         // 알 수 없는 outcome은 안전하게 UNKNOWN / UNKNOWN (절대 PASS 금지)
-        ("STRANGE_OUTCOME", QuickStatus::UNKNOWN, EvidenceLevel::UNKNOWN),
+        (
+            "STRANGE_OUTCOME",
+            QuickStatus::UNKNOWN,
+            EvidenceLevel::UNKNOWN,
+        ),
         ("", QuickStatus::UNKNOWN, EvidenceLevel::UNKNOWN),
     ];
 
@@ -104,7 +108,10 @@ fn tcp_adapter_all_outcomes_mapped_correctly() {
             .unwrap_or_else(|errs| panic!("outcome '{outcome}' 변환 실패: {errs:?}"));
 
         assert_eq!(result.status, expected_status, "outcome: {outcome}");
-        assert_eq!(result.evidence_level, expected_evidence, "outcome: {outcome}");
+        assert_eq!(
+            result.evidence_level, expected_evidence,
+            "outcome: {outcome}"
+        );
         assert_eq!(result.feature, QuickFeature::TcpConnect);
         assert_eq!(result.schema_version, "1.0");
         assert_eq!(result.product, "network-quick-check");
@@ -283,7 +290,10 @@ fn tcp_adapter_resolves_ip_from_peer_or_leaves_null_without_invention() {
     };
 
     let result = tcp_to_quick_result(&ctx, &measurement).expect("변환 자체는 허용");
-    assert_eq!(result.resolved_ip, None, "네트워크 해석 결과 발명 금지: resolved_ip는 null이어야 함");
+    assert_eq!(
+        result.resolved_ip, None,
+        "네트워크 해석 결과 발명 금지: resolved_ip는 null이어야 함"
+    );
     assert_eq!(result.target_host, "unresolved.example.corp");
     assert_eq!(result.status, QuickStatus::FAIL);
     assert_eq!(result.evidence_level, EvidenceLevel::OBSERVED);
@@ -336,7 +346,10 @@ fn quick_result_serialization_preserves_all_14_keys_including_nulls() {
 
     assert_eq!(obj.len(), 14, "정확히 14개의 필드만 존재해야 함");
     for key in expected_keys {
-        assert!(obj.contains_key(key), "필수 키 '{key}'가 누락되지 않아야 함");
+        assert!(
+            obj.contains_key(key),
+            "필수 키 '{key}'가 누락되지 않아야 함"
+        );
     }
 
     // null 필드들이 null 리터럴로 직렬화되었는지 확인
@@ -414,15 +427,17 @@ fn quick_result_deny_unknown_fields_and_invalid_enums() {
 /// 9. 작성된 테스트 픽스처 파일들(`fixtures/quick-check/**`)의 정합성 검증.
 #[test]
 fn fixtures_files_validation_against_models() {
-    let valid_connected = include_str!("../../../fixtures/quick-check/synthetic-valid-tcp-connected.json");
-    let parsed_connected: QuickResult =
-        serde_json::from_str(valid_connected).expect("synthetic-valid-tcp-connected.json 파싱 성공");
+    let valid_connected =
+        include_str!("../../../fixtures/quick-check/synthetic-valid-tcp-connected.json");
+    let parsed_connected: QuickResult = serde_json::from_str(valid_connected)
+        .expect("synthetic-valid-tcp-connected.json 파싱 성공");
     assert_eq!(parsed_connected.status, QuickStatus::PASS);
     assert_eq!(parsed_connected.evidence_level, EvidenceLevel::OBSERVED);
 
-    let valid_cancelled = include_str!("../../../fixtures/quick-check/synthetic-valid-tcp-cancelled-nulls.json");
-    let parsed_cancelled: QuickResult =
-        serde_json::from_str(valid_cancelled).expect("synthetic-valid-tcp-cancelled-nulls.json 파싱 성공");
+    let valid_cancelled =
+        include_str!("../../../fixtures/quick-check/synthetic-valid-tcp-cancelled-nulls.json");
+    let parsed_cancelled: QuickResult = serde_json::from_str(valid_cancelled)
+        .expect("synthetic-valid-tcp-cancelled-nulls.json 파싱 성공");
     assert_eq!(parsed_cancelled.status, QuickStatus::UNKNOWN);
     assert_eq!(parsed_cancelled.evidence_level, EvidenceLevel::UNKNOWN);
     assert!(parsed_cancelled.timestamp_iso8601.is_none());
@@ -432,19 +447,22 @@ fn fixtures_files_validation_against_models() {
     assert!(parsed_cancelled.os_error_code.is_none());
 
     // 음성 픽스처 검증
-    let invalid_status = include_str!("../../../fixtures/quick-check/synthetic-invalid-status.json");
+    let invalid_status =
+        include_str!("../../../fixtures/quick-check/synthetic-invalid-status.json");
     assert!(
         serde_json::from_str::<QuickResult>(invalid_status).is_err(),
         "synthetic-invalid-status.json은 역직렬화 실패해야 함"
     );
 
-    let invalid_missing = include_str!("../../../fixtures/quick-check/synthetic-invalid-missing-field.json");
+    let invalid_missing =
+        include_str!("../../../fixtures/quick-check/synthetic-invalid-missing-field.json");
     assert!(
         serde_json::from_str::<QuickResult>(invalid_missing).is_err(),
         "synthetic-invalid-missing-field.json은 필수 필드 누락으로 역직렬화 실패해야 함"
     );
 
-    let invalid_unknown = include_str!("../../../fixtures/quick-check/synthetic-invalid-unknown-field.json");
+    let invalid_unknown =
+        include_str!("../../../fixtures/quick-check/synthetic-invalid-unknown-field.json");
     assert!(
         serde_json::from_str::<QuickResult>(invalid_unknown).is_err(),
         "synthetic-invalid-unknown-field.json은 미정의 필드로 역직렬화 실패해야 함"
@@ -453,26 +471,30 @@ fn fixtures_files_validation_against_models() {
     // [부모 계약 불일치 보정]:
     // 기존 시험은 스키마가 금지한 포트 0을 단순 구조체 타입 수준에서만 확인하던 characterization이었음.
     // 스키마(minimum: 1) 및 DTO 계약에 따라 target_port 0은 역직렬화 단계에서 명시적으로 거부되어야 함.
-    let invalid_port_zero = include_str!("../../../fixtures/quick-check/synthetic-invalid-port-zero.json");
+    let invalid_port_zero =
+        include_str!("../../../fixtures/quick-check/synthetic-invalid-port-zero.json");
     assert!(
         serde_json::from_str::<QuickResult>(invalid_port_zero).is_err(),
         "synthetic-invalid-port-zero.json은 target_port=0 위반으로 역직렬화 실패해야 함"
     );
 
     // 신규 추가 음성 픽스처 검증
-    let invalid_product = include_str!("../../../fixtures/quick-check/synthetic-invalid-product.json");
+    let invalid_product =
+        include_str!("../../../fixtures/quick-check/synthetic-invalid-product.json");
     assert!(
         serde_json::from_str::<QuickResult>(invalid_product).is_err(),
         "synthetic-invalid-product.json은 product 위반으로 역직렬화 실패해야 함"
     );
 
-    let invalid_timestamp = include_str!("../../../fixtures/quick-check/synthetic-invalid-timestamp.json");
+    let invalid_timestamp =
+        include_str!("../../../fixtures/quick-check/synthetic-invalid-timestamp.json");
     assert!(
         serde_json::from_str::<QuickResult>(invalid_timestamp).is_err(),
         "synthetic-invalid-timestamp.json은 RFC3339 타임스탬프 위반으로 역직렬화 실패해야 함"
     );
 
-    let invalid_missing_nullable = include_str!("../../../fixtures/quick-check/synthetic-invalid-missing-nullable.json");
+    let invalid_missing_nullable =
+        include_str!("../../../fixtures/quick-check/synthetic-invalid-missing-nullable.json");
     assert!(
         serde_json::from_str::<QuickResult>(invalid_missing_nullable).is_err(),
         "synthetic-invalid-missing-nullable.json은 필수 nullable 키 부재로 역직렬화 실패해야 함"
@@ -528,7 +550,10 @@ fn repro_1_ip_literal_target_peer_consistency_and_domain_preservation() {
     };
 
     let res_mismatch = tcp_to_quick_result(&ctx_ip, &measurement_mismatch);
-    assert!(res_mismatch.is_err(), "IP literal 불일치는 반드시 거부되어야 함");
+    assert!(
+        res_mismatch.is_err(),
+        "IP literal 불일치는 반드시 거부되어야 함"
+    );
     let errs = res_mismatch.unwrap_err();
     assert!(
         errs.iter().any(|e| e.contains("IP 불일치 방지")),
@@ -620,7 +645,10 @@ fn repro_2_timestamp_iso8601_strict_rfc3339_matrix() {
         "2026-10-21T02:30:00.123456789+00:00",
         "2024-02-29T12:00:00Z", // 2024 윤년 2월 29일
         "2000-02-29T12:00:00Z", // 400년 주기 윤년 2월 29일
+        "1900-02-28T12:00:00Z", // 100년 주기 평년(비윤년) 2월 28일
         "2023-12-31T23:59:59Z", // 연말 경계값
+        "0001-01-01T00:00:00Z", // 지원 부분집합 1..=9999 최소 연도 경계값
+        "9999-12-31T23:59:59Z", // 지원 부분집합 1..=9999 최대 연도 경계값
     ];
     for ts in valid_cases {
         assert!(
@@ -649,11 +677,109 @@ fn repro_2_timestamp_iso8601_strict_rfc3339_matrix() {
         ("2026-10-21T12:60:00Z", "60분(초과)"),
         ("2026-10-21T12:00:60Z", "지원하지 않는 윤초(60)"),
         ("2026-10-21T12:00:00.Z", "분수초 뒤 숫자 누락"),
+        // 부모 검증 및 독립 재현 발견 9개 invalid 케이스 (숫자 형식 및 연도 지원 범위)
+        (
+            "0000-10-21T02:30:00Z",
+            "연도 0000 거부 (지원 부분집합 1..=9999)",
+        ),
+        ("+026-10-21T02:30:00Z", "연도에 부호('+') 포함 거부"),
+        ("2026-+1-21T02:30:00Z", "월에 부호('+') 포함 거부"),
+        ("2026-10-+1T02:30:00Z", "일에 부호('+') 포함 거부"),
+        ("2026-10-21T+1:30:00Z", "시에 부호('+') 포함 거부"),
+        ("2026-10-21T02:+1:00Z", "분에 부호('+') 포함 거부"),
+        ("2026-10-21T02:30:+1Z", "초에 부호('+') 포함 거부"),
+        (
+            "2026-10-21T02:30:00++1:00",
+            "오프셋 시에 부호 중복('++') 거부",
+        ),
+        (
+            "2026-10-21T02:30:00+01:+1",
+            "오프셋 분에 부호('+') 포함 거부",
+        ),
     ];
     for (ts, reason) in invalid_cases {
         assert!(
             validate_rfc3339_timestamp(ts).is_err(),
             "유효하지 않은 타임스탬프는 거부되어야 함 ({reason}): '{ts}'"
+        );
+    }
+
+    // 4. 단일 파서 경로 검증: DTO 역직렬화, 어댑터, DTO 직접 검증에서도 9개 invalid 타임스탬프 동일하게 거부
+    let nine_invalid_cases = [
+        "0000-10-21T02:30:00Z",
+        "+026-10-21T02:30:00Z",
+        "2026-+1-21T02:30:00Z",
+        "2026-10-+1T02:30:00Z",
+        "2026-10-21T+1:30:00Z",
+        "2026-10-21T02:+1:00Z",
+        "2026-10-21T02:30:+1Z",
+        "2026-10-21T02:30:00++1:00",
+        "2026-10-21T02:30:00+01:+1",
+    ];
+    for bad_ts in nine_invalid_cases {
+        // (a) DTO 역직렬화 경로 거부 확인
+        let bad_json = serde_json::json!({
+            "schema_version": "1.0",
+            "product": "network-quick-check",
+            "session_id": "test-session",
+            "timestamp_iso8601": bad_ts,
+            "source_host": null,
+            "target_host": "127.0.0.1",
+            "resolved_ip": "127.0.0.1",
+            "target_port": 80,
+            "feature": "tcp_connect",
+            "status": "PASS",
+            "elapsed_ms": 1,
+            "os_error_code": null,
+            "details": {
+                "outcome": "CONNECTED",
+                "limitations": [],
+                "raw_measurement": {}
+            },
+            "evidence_level": "OBSERVED"
+        });
+        assert!(
+            serde_json::from_value::<QuickResult>(bad_json).is_err(),
+            "역직렬화 단계에서 거부되어야 함: '{bad_ts}'"
+        );
+
+        // (b) 어댑터 경로 거부 확인
+        let ctx_bad = QuickContext {
+            session_id: "test-session".to_string(),
+            timestamp_iso8601: Some(bad_ts.to_string()),
+            source_host: None,
+            target_host: "127.0.0.1".to_string(),
+            target_port: 80,
+        };
+        assert!(
+            tcp_to_quick_result(&ctx_bad, &measurement).is_err(),
+            "어댑터 단계에서 거부되어야 함: '{bad_ts}'"
+        );
+
+        // (c) DTO 직접 검증(validate_quick_result) 경로 거부 확인
+        let bad_dto = QuickResult {
+            schema_version: "1.0".to_string(),
+            product: "network-quick-check".to_string(),
+            session_id: "test-session".to_string(),
+            timestamp_iso8601: Some(bad_ts.to_string()),
+            source_host: None,
+            target_host: "127.0.0.1".to_string(),
+            resolved_ip: Some("127.0.0.1".to_string()),
+            target_port: 80,
+            feature: QuickFeature::TcpConnect,
+            status: QuickStatus::PASS,
+            elapsed_ms: Some(1),
+            os_error_code: None,
+            details: serde_json::json!({
+                "outcome": "CONNECTED",
+                "limitations": [],
+                "raw_measurement": {}
+            }),
+            evidence_level: EvidenceLevel::OBSERVED,
+        };
+        assert!(
+            validate_quick_result(&bad_dto).is_err(),
+            "validate_quick_result에서 거부되어야 함: '{bad_ts}'"
         );
     }
 }
