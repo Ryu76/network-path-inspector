@@ -39,6 +39,7 @@ dependencies = [
  "npi-probes",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
