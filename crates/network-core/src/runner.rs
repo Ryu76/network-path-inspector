@@ -375,6 +375,24 @@ fn is_safe_resolved_ip(ip: IpAddr, port: u16) -> bool {
     true
 }
 
+/// 검증 완료된 필수 DNS 해석 원문 DTO 전체를 JSON 문자열 형태로 limitations에 첨부합니다.
+///
+/// details 3개 필드(outcome, limitations, raw_measurement) 계약을 유지하면서
+/// 완전한 JSON 문자열로 limitations 배열에 보존합니다.
+fn append_dns_raw_limitation(result: &mut QuickResult, dns_m: &DnsMeasurement) {
+    if let Ok(json_str) = serde_json::to_string(dns_m)
+        && let Some(details_obj) = result.details.as_object_mut()
+        && let Some(limitations_val) = details_obj.get_mut("limitations")
+        && let Some(limitations) = limitations_val.as_array_mut()
+    {
+        let raw_dto_msg =
+            serde_json::Value::String(format!("필수 DNS 해석 원문(JSON): {json_str}"));
+        if !limitations.contains(&raw_dto_msg) {
+            limitations.push(raw_dto_msg);
+        }
+    }
+}
+
 /// 도메인 대상의 프로브 결과에 DNS 필수 해석 원문 정보 및 첫 후보 선택 정책 한계를 추가합니다.
 ///
 /// 기존 `details.raw_measurement`를 일체 덮어쓰지 않고 `limitations` 배열에만 고유하게 추가합니다.
@@ -402,6 +420,7 @@ fn append_domain_resolution_limitations(
             limitations.push(raw_addresses_msg);
         }
     }
+    append_dns_raw_limitation(result, dns_m);
 }
 
 /// 선행 DNS 해석 실패 또는 미지원 기능에 대한 UNAVAILABLE 결과를 생성합니다.
@@ -780,6 +799,8 @@ async fn run_single_target(
                                 ));
                             }
                             dns_quick_result = Some(Ok(verified_q_res));
+                            // 유효성 검증(dns_to_quick_result)을 통과한 valid한 DTO만 보존 (불량 원문 반사 방지)
+                            dns_measurement = Some(measurement);
                         }
                         Err(val_errs) => {
                             let msg = format!("DNS 결과 유효성 검증 실패: {}", val_errs.join("; "));
@@ -789,7 +810,6 @@ async fn run_single_target(
                             dns_quick_result = Some(Err(val_errs));
                         }
                     }
-                    dns_measurement = Some(measurement);
                 }
                 Err(backend_errs) => {
                     let msg = format!("DNS 백엔드 호출 실패: {}", backend_errs.join("; "));
@@ -854,8 +874,9 @@ async fn run_single_target(
             }
 
             QuickFeature::TcpConnect => {
+                // 선행 DNS 해석 완료 직후 취소 시 해당 의존 기능만 건너뛰고 완료된 DNS 결과는 보존
                 if exec_ctx.cancel.load(Ordering::SeqCst) {
-                    break;
+                    continue;
                 }
 
                 let Some(ip) = selected_ip else {
@@ -865,7 +886,10 @@ async fn run_single_target(
                             planned_target.target.host
                         )
                     });
-                    let res = make_unavailable_result(&ctx, QuickFeature::TcpConnect, reason);
+                    let mut res = make_unavailable_result(&ctx, QuickFeature::TcpConnect, reason);
+                    if !is_ip && let Some(ref dns_m) = dns_measurement {
+                        append_dns_raw_limitation(&mut res, dns_m);
+                    }
                     results.push((feature_idx, res));
                     continue;
                 };
@@ -899,8 +923,9 @@ async fn run_single_target(
             }
 
             QuickFeature::IcmpPing => {
+                // 선행 DNS 해석 완료 직후 취소 시 해당 의존 기능만 건너뛰고 완료된 DNS 결과는 보존
                 if exec_ctx.cancel.load(Ordering::SeqCst) {
-                    break;
+                    continue;
                 }
 
                 let Some(ip) = selected_ip else {
@@ -910,7 +935,10 @@ async fn run_single_target(
                             planned_target.target.host
                         )
                     });
-                    let res = make_unavailable_result(&ctx, QuickFeature::IcmpPing, reason);
+                    let mut res = make_unavailable_result(&ctx, QuickFeature::IcmpPing, reason);
+                    if !is_ip && let Some(ref dns_m) = dns_measurement {
+                        append_dns_raw_limitation(&mut res, dns_m);
+                    }
                     results.push((feature_idx, res));
                     continue;
                 };
@@ -944,8 +972,9 @@ async fn run_single_target(
             }
 
             QuickFeature::LocalNetwork => {
+                // 선행 DNS 해석 완료 직후 취소 시 해당 의존 기능만 건너뛰고 완료된 DNS 결과는 보존
                 if exec_ctx.cancel.load(Ordering::SeqCst) {
-                    break;
+                    continue;
                 }
 
                 let Some(ip) = selected_ip else {
@@ -955,7 +984,10 @@ async fn run_single_target(
                             planned_target.target.host
                         )
                     });
-                    let res = make_unavailable_result(&ctx, QuickFeature::LocalNetwork, reason);
+                    let mut res = make_unavailable_result(&ctx, QuickFeature::LocalNetwork, reason);
+                    if !is_ip && let Some(ref dns_m) = dns_measurement {
+                        append_dns_raw_limitation(&mut res, dns_m);
+                    }
                     results.push((feature_idx, res));
                     continue;
                 };

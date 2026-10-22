@@ -1194,6 +1194,101 @@ async fn parent_cancel_after_tcp_preserves_completed_dns_and_omits_ping() {
     assert_eq!(report.invocations.dns_lookup, 1);
 }
 
+/// 도메인 대상 Ping 단독 선택 시에도 필수 DNS 해석 전체 원문 DTO가 limitations에 보존되는지 검증.
+#[tokio::test]
+async fn parent_hidden_dns_success_ping_preserves_whole_dto() {
+    let backend = Arc::new(MockProbeBackend::new());
+    backend.set_dns_responder(Arc::new(|ctx| {
+        Ok(parent_dns_fixture(&ctx.target_host, ctx.target_port, true))
+    }));
+    let request = make_request(
+        vec![make_target("hidden-ping.invalid", 80)],
+        vec![QuickFeature::IcmpPing],
+        1,
+        DEFAULT_MAX_RESULT_BYTES,
+    );
+    let report = run_quick(&request, backend.clone(), Arc::new(AtomicBool::new(false)))
+        .await
+        .unwrap();
+    assert_eq!(report.results.len(), 1);
+    assert_eq!(report.results[0].feature, QuickFeature::IcmpPing);
+    assert_eq!(report.results[0].status, QuickStatus::PASS);
+    assert_eq!(backend.call_counts(), (0, 1, 0, 1));
+    parent_assert_full_dns_preserved(
+        &report.results[0],
+        &parent_dns_fixture("hidden-ping.invalid", 80, true),
+    );
+}
+
+/// 도메인 대상 Host 스냅샷 단독 선택 시에도 필수 DNS 해석 전체 원문 DTO가 limitations에 보존되는지 검증.
+#[tokio::test]
+async fn parent_hidden_dns_success_host_preserves_whole_dto() {
+    let backend = Arc::new(MockProbeBackend::new());
+    backend.set_dns_responder(Arc::new(|ctx| {
+        Ok(parent_dns_fixture(&ctx.target_host, ctx.target_port, true))
+    }));
+    let request = make_request(
+        vec![make_target("hidden-host.invalid", 80)],
+        vec![QuickFeature::LocalNetwork],
+        1,
+        DEFAULT_MAX_RESULT_BYTES,
+    );
+    let report = run_quick(&request, backend.clone(), Arc::new(AtomicBool::new(false)))
+        .await
+        .unwrap();
+    assert_eq!(report.results.len(), 1);
+    assert_eq!(report.results[0].feature, QuickFeature::LocalNetwork);
+    assert_eq!(report.results[0].status, QuickStatus::PASS);
+    assert_eq!(backend.call_counts(), (0, 0, 1, 1));
+    parent_assert_full_dns_preserved(
+        &report.results[0],
+        &parent_dns_fixture("hidden-host.invalid", 80, true),
+    );
+}
+
+/// 어댑터 검증에서 거절된 불량 host 원문은 UNAVAILABLE limitations에 반사되지 않고 고정 거부 사유만 남는지 검증.
+#[tokio::test]
+async fn parent_hidden_dns_malformed_host_rejected_without_reflecting_raw_dto() {
+    let backend = Arc::new(MockProbeBackend::new());
+    backend.set_dns_responder(Arc::new(|ctx| {
+        Ok(DnsMeasurement {
+            host: "bad_host_with_credential@example.com".to_string(),
+            port: ctx.target_port,
+            outcome: "RESOLVED".to_string(),
+            addresses: vec![format!("127.0.0.1:{}", ctx.target_port)],
+            elapsed_ms: 10,
+            error_code: None,
+            error_message: None,
+            limitations: vec![],
+        })
+    }));
+    let request = make_request(
+        vec![make_target("valid-target.invalid", 80)],
+        vec![QuickFeature::TcpConnect],
+        1,
+        DEFAULT_MAX_RESULT_BYTES,
+    );
+    let report = run_quick(&request, backend.clone(), Arc::new(AtomicBool::new(false)))
+        .await
+        .unwrap();
+    assert_eq!(report.results.len(), 1);
+    assert_eq!(report.results[0].status, QuickStatus::UNKNOWN);
+    assert_eq!(report.results[0].details["outcome"], "UNAVAILABLE");
+    let limitations = report.results[0].details["limitations"].as_array().unwrap();
+    assert!(
+        !limitations
+            .iter()
+            .any(|v| v.as_str().unwrap().contains("bad_host_with_credential")),
+        "불량 호스트 원문이 반사되지 않아야 함"
+    );
+    assert!(
+        !limitations
+            .iter()
+            .any(|v| v.as_str().unwrap().contains("필수 DNS 해석 원문(JSON)")),
+        "검증 실패한 DTO는 JSON 원문 limitations에 첨부되지 않아야 함"
+    );
+}
+
 // ============================================================================
 // 실제 루프백 격리 테스트 (부모 명시 실행 전용: ignored)
 // ============================================================================
