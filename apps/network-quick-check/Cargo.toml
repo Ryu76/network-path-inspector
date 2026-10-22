@@ -1,0 +1,16 @@
+[package]
+name = "network-quick-check"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "NetworkQuickCheck"
+path = "src/main.rs"
+
+[dependencies]
+network-core = { path = "../../crates/network-core" }
+
+[dev-dependencies]
+tokio = { version = "=1.52.3", features = ["rt", "time"] }

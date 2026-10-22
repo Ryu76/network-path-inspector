@@ -45,6 +45,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "network-quick-check"
+version = "0.1.0"
+dependencies = [
+ "network-core",
+ "tokio",
+]
+
+[[package]]
 name = "network-resolver"
 version = "0.1.0"
 dependencies = [
