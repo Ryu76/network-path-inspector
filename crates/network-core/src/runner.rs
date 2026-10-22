@@ -196,7 +196,8 @@ pub trait QuickProbeBackend: Send + Sync {
                 "UNAVAILABLE"
             };
             let limitation = if is_cancelled {
-                "진단 시작 전 취소 요청이 감지되어 Traceroute 프로브를 실행하지 않았습니다.".to_string()
+                "진단 시작 전 취소 요청이 감지되어 Traceroute 프로브를 실행하지 않았습니다."
+                    .to_string()
             } else {
                 "기본 프로브 백엔드에 ICMP Traceroute(trace)가 구현되지 않았습니다.".to_string()
             };
@@ -717,7 +718,7 @@ fn verify_backend_result(
 /// 4. raw_measurement를 TraceMeasurement로 역직렬화한 후 다시 직렬화하는 roundtrip 일치를 확인합니다.
 /// 5. raw_measurement.target IP를 파싱하여 기대 대상 IP(expected_ip)와 정확히 일치하는지 확인합니다.
 /// 6. `trace_to_quick_result`를 호출하여 canonical outcome/status/evidence/elapsed/os_error_code/raw의 일치를 검증합니다.
-/// 7. 검증 실패 시 위조/불량 응답을 수리하지 않고 고정 LOCAL_ERROR 경로로 거부하며 민감 원문을 반사하지 않습니다.
+/// 7. 검증 실패 시 위조/불량 응답을 수리하지 않고 고정 LOCAL_ERROR 경로로 거부하며 거부된 임의 원문/불량값을 반사하지 않습니다.
 fn verify_trace_backend_result(
     ctx: &QuickContext,
     expected_ip: Option<IpAddr>,
@@ -726,60 +727,38 @@ fn verify_trace_backend_result(
 ) -> QuickResult {
     match backend_res {
         Ok(res) => {
-            let mut mismatches = Vec::new();
+            let mut mismatches: Vec<&'static str> = Vec::new();
 
             // 1. 공통 generic 메타데이터 검증
             if res.session_id != ctx.session_id {
-                mismatches.push(format!(
-                    "session_id 불일치 (기대: '{}', 실제: '{}')",
-                    ctx.session_id, res.session_id
-                ));
+                mismatches.push("session_id 불일치");
             }
             if res.target_host != ctx.target_host {
-                mismatches.push(format!(
-                    "target_host 불일치 (기대: '{}', 실제: '{}')",
-                    ctx.target_host, res.target_host
-                ));
+                mismatches.push("target_host 불일치");
             }
             if res.target_port != ctx.target_port {
-                mismatches.push(format!(
-                    "target_port 불일치 (기대: {}, 실제: {})",
-                    ctx.target_port, res.target_port
-                ));
+                mismatches.push("target_port 불일치");
             }
             if res.feature != QuickFeature::IcmpTraceroute {
-                mismatches.push(format!(
-                    "feature 불일치 (기대: {:?}, 실제: {:?})",
-                    QuickFeature::IcmpTraceroute,
-                    res.feature
-                ));
+                mismatches.push("feature 불일치");
             }
             if res.timestamp_iso8601 != ctx.timestamp_iso8601 {
-                mismatches.push(format!(
-                    "timestamp_iso8601 불일치 (기대: {:?}, 실제: {:?})",
-                    ctx.timestamp_iso8601, res.timestamp_iso8601
-                ));
+                mismatches.push("timestamp_iso8601 불일치");
             }
             if res.source_host != ctx.source_host {
-                mismatches.push(format!(
-                    "source_host 불일치 (기대: {:?}, 실제: {:?})",
-                    ctx.source_host, res.source_host
-                ));
+                mismatches.push("source_host 불일치");
             }
 
-            if let Err(val_errs) = validate_quick_result(&res) {
-                mismatches.extend(val_errs);
+            if validate_quick_result(&res).is_err() {
+                mismatches.push("QuickResult 스키마 유효성 검증 실패");
             }
 
             // 2. details 구조 및 raw_measurement 무결성 검증
             let details_obj = match res.details.as_object() {
                 Some(obj) => obj,
                 None => {
-                    mismatches.push("details가 JSON 객체 형식이 아닙니다.".to_string());
-                    let err_text = format!(
-                        "Traceroute 백엔드 결과 무결성 위반: {}",
-                        mismatches.join("; ")
-                    );
+                    let err_text =
+                        "Traceroute 백엔드 결과 무결성 위반: details 객체 형식 오류".to_string();
                     errors.push(err_text.clone());
                     return make_local_error_result(
                         ctx,
@@ -797,11 +776,9 @@ fn verify_trace_backend_result(
             let raw_val = match details_obj.get("raw_measurement") {
                 Some(v) => v,
                 None => {
-                    mismatches.push("details에 raw_measurement 키가 누락되었습니다.".to_string());
-                    let err_text = format!(
-                        "Traceroute 백엔드 결과 무결성 위반: {}",
-                        mismatches.join("; ")
-                    );
+                    let err_text =
+                        "Traceroute 백엔드 결과 무결성 위반: details raw_measurement 누락"
+                            .to_string();
                     errors.push(err_text.clone());
                     return make_local_error_result(
                         ctx,
@@ -812,53 +789,33 @@ fn verify_trace_backend_result(
                 }
             };
 
-            let is_empty_raw = raw_val.as_object().map_or(false, |m| m.is_empty());
+            let is_empty_raw = raw_val.as_object().is_some_and(|m| m.is_empty());
 
             if is_empty_raw {
                 // default 미측정 상태: UNAVAILABLE 또는 CANCELLED만 빈 raw_measurement를 허용
                 if outcome_str != "UNAVAILABLE" && outcome_str != "CANCELLED" {
-                    mismatches.push(format!(
-                        "빈 raw_measurement 상태에서는 outcome이 UNAVAILABLE 또는 CANCELLED여야 합니다 (실제: '{outcome_str}')."
-                    ));
+                    mismatches.push("미측정 기본 결과의 outcome 불일치");
                 }
                 if res.status != QuickStatus::UNKNOWN {
-                    mismatches.push(format!(
-                        "미측정 기본 결과의 status는 UNKNOWN이어야 합니다 (실제: {:?}).",
-                        res.status
-                    ));
+                    mismatches.push("미측정 기본 결과의 status 불일치");
                 }
                 if res.evidence_level != EvidenceLevel::UNKNOWN {
-                    mismatches.push(format!(
-                        "미측정 기본 결과의 evidence_level은 UNKNOWN이어야 합니다 (실제: {:?}).",
-                        res.evidence_level
-                    ));
+                    mismatches.push("미측정 기본 결과의 evidence_level 불일치");
                 }
                 if res.elapsed_ms.is_some() {
-                    mismatches.push(
-                        "미측정 기본 결과의 elapsed_ms는 null이어야 합니다.".to_string(),
-                    );
+                    mismatches.push("미측정 기본 결과의 elapsed_ms 불일치");
                 }
                 if res.os_error_code.is_some() {
-                    mismatches.push(
-                        "미측정 기본 결과의 os_error_code는 null이어야 합니다.".to_string(),
-                    );
+                    mismatches.push("미측정 기본 결과의 os_error_code 불일치");
                 }
                 if res.resolved_ip.is_some() {
-                    mismatches.push(
-                        "미측정 기본 결과의 resolved_ip는 null이어야 합니다.".to_string(),
-                    );
+                    mismatches.push("미측정 기본 결과의 resolved_ip 불일치");
                 }
             } else {
                 // 실측 row 검증
                 let Some(exp_ip) = expected_ip else {
-                    mismatches.push(
-                        "실측 Traceroute 결과이나 기대 대상 IP(expected_ip)가 없습니다."
-                            .to_string(),
-                    );
-                    let err_text = format!(
-                        "Traceroute 백엔드 결과 무결성 위반: {}",
-                        mismatches.join("; ")
-                    );
+                    let err_text =
+                        "Traceroute 백엔드 결과 무결성 위반: 기대 대상 IP 누락".to_string();
                     errors.push(err_text.clone());
                     return make_local_error_result(
                         ctx,
@@ -872,16 +829,11 @@ fn verify_trace_backend_result(
                 match &res.resolved_ip {
                     Some(top_ip) => {
                         if top_ip != &expected_ip_str {
-                            mismatches.push(format!(
-                                "top resolved_ip 불일치 (기대: '{expected_ip_str}', 실제: '{top_ip}')"
-                            ));
+                            mismatches.push("top resolved_ip 불일치");
                         }
                     }
                     None => {
-                        mismatches.push(
-                            "실측 Traceroute 결과의 top resolved_ip가 null일 수 없습니다."
-                                .to_string(),
-                        );
+                        mismatches.push("실측 Traceroute 결과의 top resolved_ip 누락");
                     }
                 }
 
@@ -891,13 +843,11 @@ fn verify_trace_backend_result(
                         match serde_json::to_value(&measurement) {
                             Ok(roundtrip_val) => {
                                 if &roundtrip_val != raw_val {
-                                    mismatches.push(
-                                        "raw_measurement 직렬화 roundtrip 불일치".to_string(),
-                                    );
+                                    mismatches.push("raw_measurement 직렬화 roundtrip 불일치");
                                 }
                             }
-                            Err(e) => {
-                                mismatches.push(format!("TraceMeasurement 재직렬화 실패: {e}"));
+                            Err(_) => {
+                                mismatches.push("TraceMeasurement 재직렬화 실패");
                             }
                         }
 
@@ -905,16 +855,11 @@ fn verify_trace_backend_result(
                         match measurement.target.parse::<IpAddr>() {
                             Ok(parsed_target_ip) => {
                                 if parsed_target_ip != exp_ip {
-                                    mismatches.push(format!(
-                                        "raw_measurement.target IP({parsed_target_ip})가 기대 대상 IP({exp_ip})와 불일치합니다."
-                                    ));
+                                    mismatches.push("raw_measurement target IP 불일치");
                                 }
                             }
                             Err(_) => {
-                                mismatches.push(
-                                    "raw_measurement.target이 유효한 IpAddr 형식이 아닙니다."
-                                        .to_string(),
-                                );
+                                mismatches.push("raw_measurement target IP 형식 오류");
                             }
                         }
 
@@ -922,34 +867,19 @@ fn verify_trace_backend_result(
                         match trace_to_quick_result(ctx, &measurement) {
                             Ok(canonical) => {
                                 if res.status != canonical.status {
-                                    mismatches.push(format!(
-                                        "status 불일치 (기대: {:?}, 실제: {:?})",
-                                        canonical.status, res.status
-                                    ));
+                                    mismatches.push("status 불일치");
                                 }
                                 if res.evidence_level != canonical.evidence_level {
-                                    mismatches.push(format!(
-                                        "evidence_level 불일치 (기대: {:?}, 실제: {:?})",
-                                        canonical.evidence_level, res.evidence_level
-                                    ));
+                                    mismatches.push("evidence_level 불일치");
                                 }
                                 if res.elapsed_ms != canonical.elapsed_ms {
-                                    mismatches.push(format!(
-                                        "elapsed_ms 불일치 (기대: {:?}, 실제: {:?})",
-                                        canonical.elapsed_ms, res.elapsed_ms
-                                    ));
+                                    mismatches.push("elapsed_ms 불일치");
                                 }
                                 if res.os_error_code != canonical.os_error_code {
-                                    mismatches.push(format!(
-                                        "os_error_code 불일치 (기대: {:?}, 실제: {:?})",
-                                        canonical.os_error_code, res.os_error_code
-                                    ));
+                                    mismatches.push("os_error_code 불일치");
                                 }
                                 if res.resolved_ip != canonical.resolved_ip {
-                                    mismatches.push(format!(
-                                        "resolved_ip 불일치 (기대: {:?}, 실제: {:?})",
-                                        canonical.resolved_ip, res.resolved_ip
-                                    ));
+                                    mismatches.push("resolved_ip 불일치");
                                 }
                                 let can_outcome = canonical
                                     .details
@@ -957,27 +887,21 @@ fn verify_trace_backend_result(
                                     .and_then(|v| v.as_str())
                                     .unwrap_or("");
                                 if outcome_str != can_outcome {
-                                    mismatches.push(format!(
-                                        "details.outcome 불일치 (기대: '{can_outcome}', 실제: '{outcome_str}')"
-                                    ));
+                                    mismatches.push("details.outcome 불일치");
                                 }
                                 let can_raw = canonical.details.get("raw_measurement");
                                 if Some(raw_val) != can_raw {
-                                    mismatches.push("details.raw_measurement 불일치".to_string());
+                                    mismatches.push("details.raw_measurement 불일치");
                                 }
                             }
-                            Err(adapter_errs) => {
-                                mismatches.push(format!(
-                                    "trace_to_quick_result 어댑터 검증 실패: {}",
-                                    adapter_errs.join("; ")
-                                ));
+                            Err(_) => {
+                                mismatches.push("trace_to_quick_result 어댑터 검증 실패");
                             }
                         }
                     }
                     Err(_) => {
                         mismatches.push(
-                            "raw_measurement를 TraceMeasurement 구조로 역직렬화할 수 없습니다."
-                                .to_string(),
+                            "raw_measurement를 TraceMeasurement 구조로 역직렬화할 수 없습니다.",
                         );
                     }
                 }
@@ -991,23 +915,13 @@ fn verify_trace_backend_result(
                     mismatches.join("; ")
                 );
                 errors.push(err_text.clone());
-                make_local_error_result(
-                    ctx,
-                    QuickFeature::IcmpTraceroute,
-                    expected_ip,
-                    err_text,
-                )
+                make_local_error_result(ctx, QuickFeature::IcmpTraceroute, expected_ip, err_text)
             }
         }
-        Err(err_list) => {
-            let err_text = format!("백엔드 Traceroute 프로브 실행 오류: {}", err_list.join("; "));
+        Err(_) => {
+            let err_text = "백엔드 Traceroute 프로브 실행 오류".to_string();
             errors.push(err_text.clone());
-            make_local_error_result(
-                ctx,
-                QuickFeature::IcmpTraceroute,
-                expected_ip,
-                err_text,
-            )
+            make_local_error_result(ctx, QuickFeature::IcmpTraceroute, expected_ip, err_text)
         }
     }
 }
@@ -1443,12 +1357,8 @@ async fn run_single_target(
                 );
                 let backend_res = backend_future.await;
 
-                let mut verified = verify_trace_backend_result(
-                    &ctx,
-                    Some(ip),
-                    backend_res,
-                    &mut errors,
-                );
+                let mut verified =
+                    verify_trace_backend_result(&ctx, Some(ip), backend_res, &mut errors);
 
                 if !is_ip && let Some(ref dns_m) = dns_measurement {
                     append_domain_resolution_limitations(&mut verified, dns_m, ip);
