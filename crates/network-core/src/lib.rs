@@ -43,3 +43,6 @@ pub mod runner;
 // 두 제품이 공유하는 OS resolver 단일 구현. DNS 서버/RR/TTL 관측을 의미하지 않는다.
 pub use network_resolver as dns_engine;
 pub mod dns;
+
+// 단독 ICMP 경로 측정. 응답 없는 홉은 차단 증거가 아니다.
+pub mod traceroute;
