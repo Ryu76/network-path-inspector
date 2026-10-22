@@ -6,9 +6,11 @@
 //!    - 1ms 미만(`<1 ms`) 상한 표기 및 타임아웃(`*`) 처리
 //!    - IPv4 및 IPv6 다중 홉 경로
 //!    - TTL 순서/중복/범위 위반 및 불량 홉 파싱 거절
+//!    - u8 범위 분리(256 오버플로우 에러) 및 RTT 필수 ms 단위, '+' 부호 거절
 //! 2. 진단 결과 어댑터 (`trace_to_quick_result`) 및 스키마 검증.
 //!    - REACHED, INCOMPLETE, TIMED_OUT, CANCELLED, LOCAL_ERROR, UNAVAILABLE 매핑
 //!    - IP 일관성 및 컨텍스트 교차 오염 차단
+//!    - raw_stdout 재파싱 정합성 및 절삭/비정상 exit 코드 승격 차단
 //! 3. 실행 전 매개변수 및 안전하지 않은 IP 차단 (`trace_once`, spawn 0회 보장).
 //! 4. 실제 소유 IPv4/IPv6 루프백 진단 (`#[ignore]`, 부모 전용 통합 실행).
 
@@ -20,8 +22,7 @@ use network_core::quick::{
     EvidenceLevel, QuickContext, QuickFeature, QuickStatus, validate_quick_result,
 };
 use network_core::traceroute::{
-    TraceHop, TraceMeasurement, TraceOptions, parse_trace_output, trace_once,
-    trace_to_quick_result,
+    TraceHop, TraceMeasurement, TraceOptions, parse_trace_output, trace_once, trace_to_quick_result,
 };
 
 /// [합성 픽스처] Windows 영어 로케일 단일 홉 정상 도달 출력.
@@ -89,10 +90,7 @@ fn test_synthetic_ipv4_reached_parse_english() {
     assert_eq!(hops.len(), 1);
     assert_eq!(hops[0].ttl, 1);
     assert_eq!(hops[0].address.as_deref(), Some("127.0.0.1"));
-    assert_eq!(
-        hops[0].probe_times_ms,
-        vec![Some(1), Some(1), Some(1)]
-    );
+    assert_eq!(hops[0].probe_times_ms, vec![Some(1), Some(1), Some(1)]);
     assert_eq!(hops[0].rtt_less_than, vec![true, true, true]);
     assert!(hops[0].raw_line.contains("127.0.0.1"));
 }
@@ -100,39 +98,28 @@ fn test_synthetic_ipv4_reached_parse_english() {
 #[test]
 fn test_synthetic_ipv4_reached_parse_korean() {
     let target: IpAddr = "127.0.0.1".parse().unwrap();
-    let hops = parse_trace_output(
-        target,
-        SYNTHETIC_FIXTURE_IPV4_KOREAN_REACHED.as_bytes(),
-        30,
-    )
-    .expect("한국어 정상 출력 파싱 실패");
+    let hops = parse_trace_output(target, SYNTHETIC_FIXTURE_IPV4_KOREAN_REACHED.as_bytes(), 30)
+        .expect("한국어 정상 출력 파싱 실패");
 
     assert_eq!(hops.len(), 1);
     assert_eq!(hops[0].ttl, 1);
     assert_eq!(hops[0].address.as_deref(), Some("127.0.0.1"));
-    assert_eq!(
-        hops[0].probe_times_ms,
-        vec![Some(1), Some(1), Some(1)]
-    );
+    assert_eq!(hops[0].probe_times_ms, vec![Some(1), Some(1), Some(1)]);
     assert_eq!(hops[0].rtt_less_than, vec![true, true, true]);
 }
 
 #[test]
 fn test_synthetic_multi_hop_with_timeout_parse() {
     let target: IpAddr = "192.168.1.1".parse().unwrap();
-    let hops =
-        parse_trace_output(target, SYNTHETIC_FIXTURE_MULTI_HOP_MIXED.as_bytes(), 30)
-            .expect("다중 홉 파싱 실패");
+    let hops = parse_trace_output(target, SYNTHETIC_FIXTURE_MULTI_HOP_MIXED.as_bytes(), 30)
+        .expect("다중 홉 파싱 실패");
 
     assert_eq!(hops.len(), 3);
 
     // 홉 1: 정상 응답
     assert_eq!(hops[0].ttl, 1);
     assert_eq!(hops[0].address.as_deref(), Some("10.0.0.1"));
-    assert_eq!(
-        hops[0].probe_times_ms,
-        vec![Some(2), Some(1), Some(2)]
-    );
+    assert_eq!(hops[0].probe_times_ms, vec![Some(2), Some(1), Some(2)]);
     assert_eq!(hops[0].rtt_less_than, vec![false, false, false]);
 
     // 홉 2: 전면 타임아웃
@@ -144,10 +131,7 @@ fn test_synthetic_multi_hop_with_timeout_parse() {
     // 홉 3: 일부 타임아웃 혼합
     assert_eq!(hops[2].ttl, 3);
     assert_eq!(hops[2].address.as_deref(), Some("192.168.1.1"));
-    assert_eq!(
-        hops[2].probe_times_ms,
-        vec![Some(8), None, Some(9)]
-    );
+    assert_eq!(hops[2].probe_times_ms, vec![Some(8), None, Some(9)]);
     assert_eq!(hops[2].rtt_less_than, vec![false, false, false]);
 }
 
@@ -173,17 +157,13 @@ fn test_synthetic_korean_timed_out_hop_parse() {
 #[test]
 fn test_synthetic_ipv6_reached_parse() {
     let target: IpAddr = "::1".parse().unwrap();
-    let hops =
-        parse_trace_output(target, SYNTHETIC_FIXTURE_IPV6_REACHED.as_bytes(), 30)
-            .expect("IPv6 정상 출력 파싱 실패");
+    let hops = parse_trace_output(target, SYNTHETIC_FIXTURE_IPV6_REACHED.as_bytes(), 30)
+        .expect("IPv6 정상 출력 파싱 실패");
 
     assert_eq!(hops.len(), 1);
     assert_eq!(hops[0].ttl, 1);
     assert_eq!(hops[0].address.as_deref(), Some("::1"));
-    assert_eq!(
-        hops[0].probe_times_ms,
-        vec![Some(1), Some(1), Some(1)]
-    );
+    assert_eq!(hops[0].probe_times_ms, vec![Some(1), Some(1), Some(1)]);
     assert_eq!(hops[0].rtt_less_than, vec![true, true, true]);
 }
 
@@ -263,20 +243,18 @@ fn test_synthetic_parse_error_ip_version_mismatch() {
 #[test]
 fn test_adapter_reached_to_quick_result() {
     let ctx = create_test_context("127.0.0.1");
+    let raw = SYNTHETIC_FIXTURE_IPV4_ENGLISH_REACHED.as_bytes().to_vec();
+    let hops =
+        parse_trace_output("127.0.0.1".parse().unwrap(), &raw, 30).expect("합성 hop 파싱 실패");
+
     let measurement = TraceMeasurement {
         target: "127.0.0.1".to_string(),
         method: "ICMP_TRACERT".to_string(),
         outcome: "REACHED".to_string(),
-        hops: vec![TraceHop {
-            ttl: 1,
-            address: Some("127.0.0.1".to_string()),
-            probe_times_ms: vec![Some(1), Some(1), Some(1)],
-            rtt_less_than: vec![true, true, true],
-            raw_line: "  1    <1 ms    <1 ms    <1 ms  127.0.0.1".to_string(),
-        }],
+        hops,
         elapsed_ms: 12,
         exit_code: Some(0),
-        raw_stdout: b"Trace complete.".to_vec(),
+        raw_stdout: raw,
         raw_stderr: Vec::new(),
         output_truncated: false,
         limitations: vec!["테스트 안내".to_string()],
@@ -297,29 +275,18 @@ fn test_adapter_reached_to_quick_result() {
 #[test]
 fn test_adapter_incomplete_with_valid_hops() {
     let ctx = create_test_context("192.168.1.1");
+    let raw = SYNTHETIC_FIXTURE_MULTI_HOP_MIXED.as_bytes().to_vec();
+    let hops =
+        parse_trace_output("192.168.1.1".parse().unwrap(), &raw, 30).expect("다중 홉 파싱 실패");
+
     let measurement = TraceMeasurement {
         target: "192.168.1.1".to_string(),
         method: "ICMP_TRACERT".to_string(),
         outcome: "INCOMPLETE".to_string(),
-        hops: vec![
-            TraceHop {
-                ttl: 1,
-                address: Some("10.0.0.1".to_string()),
-                probe_times_ms: vec![Some(2), Some(2), Some(2)],
-                rtt_less_than: vec![false, false, false],
-                raw_line: "  1     2 ms     2 ms     2 ms  10.0.0.1".to_string(),
-            },
-            TraceHop {
-                ttl: 2,
-                address: None,
-                probe_times_ms: vec![None, None, None],
-                rtt_less_than: vec![false, false, false],
-                raw_line: "  2     *        *        *     Request timed out.".to_string(),
-            },
-        ],
+        hops,
         elapsed_ms: 3000,
         exit_code: Some(0),
-        raw_stdout: Vec::new(),
+        raw_stdout: raw,
         raw_stderr: Vec::new(),
         output_truncated: false,
         limitations: Vec::new(),
@@ -336,20 +303,18 @@ fn test_adapter_incomplete_with_valid_hops() {
 #[test]
 fn test_adapter_incomplete_without_valid_hops() {
     let ctx = create_test_context("192.168.1.1");
+    let raw = b"  1     *        *        *     Request timed out.\r\n".to_vec();
+    let hops = parse_trace_output("192.168.1.1".parse().unwrap(), &raw, 30)
+        .expect("타임아웃 홉 파싱 실패");
+
     let measurement = TraceMeasurement {
         target: "192.168.1.1".to_string(),
         method: "ICMP_TRACERT".to_string(),
         outcome: "INCOMPLETE".to_string(),
-        hops: vec![TraceHop {
-            ttl: 1,
-            address: None,
-            probe_times_ms: vec![None, None, None],
-            rtt_less_than: vec![false, false, false],
-            raw_line: "  1     *        *        *     Request timed out.".to_string(),
-        }],
+        hops,
         elapsed_ms: 1000,
         exit_code: Some(0),
-        raw_stdout: Vec::new(),
+        raw_stdout: raw,
         raw_stderr: Vec::new(),
         output_truncated: false,
         limitations: Vec::new(),
@@ -523,6 +488,241 @@ fn test_trace_once_precancelled() {
     assert_eq!(res.outcome, "CANCELLED");
     assert_eq!(res.elapsed_ms, 0);
     assert!(res.hops.is_empty());
+}
+
+// =========================================================================
+// QA 4P1+2P2 및 부모 경계 불변식 회귀 테스트 모음
+// =========================================================================
+
+#[test]
+fn test_boundary_reached_without_target_hop_never_passes() {
+    let ctx = create_test_context("127.0.0.1");
+    let measurement = TraceMeasurement {
+        target: "127.0.0.1".to_string(),
+        method: "ICMP_TRACERT".to_string(),
+        outcome: "REACHED".to_string(),
+        hops: Vec::new(),
+        elapsed_ms: 1,
+        exit_code: Some(0),
+        raw_stdout: Vec::new(),
+        raw_stderr: Vec::new(),
+        output_truncated: false,
+        limitations: vec!["synthetic-only".to_string()],
+    };
+    let r = trace_to_quick_result(&ctx, &measurement);
+    assert!(
+        r.is_err() || r.unwrap().status != QuickStatus::PASS,
+        "대상 응답 증거가 없는 REACHED를 PASS로 승격 금지"
+    );
+}
+
+#[test]
+fn test_boundary_invalid_raw_target_never_passes() {
+    let ctx = create_test_context("127.0.0.1");
+    let raw = SYNTHETIC_FIXTURE_IPV4_ENGLISH_REACHED.as_bytes().to_vec();
+    let hops = parse_trace_output("127.0.0.1".parse().unwrap(), &raw, 30).unwrap();
+    let measurement = TraceMeasurement {
+        target: "not-an-ip".to_string(),
+        method: "ICMP_TRACERT".to_string(),
+        outcome: "REACHED".to_string(),
+        hops,
+        elapsed_ms: 12,
+        exit_code: Some(0),
+        raw_stdout: raw,
+        raw_stderr: Vec::new(),
+        output_truncated: false,
+        limitations: Vec::new(),
+    };
+    let r = trace_to_quick_result(&ctx, &measurement);
+    assert!(
+        r.is_err() || r.unwrap().status != QuickStatus::PASS,
+        "잘못된 대상 IP 문자열은 PASS로 승격 금지"
+    );
+}
+
+#[test]
+fn test_boundary_truncated_success_never_passes() {
+    let ctx = create_test_context("127.0.0.1");
+    let raw = SYNTHETIC_FIXTURE_IPV4_ENGLISH_REACHED.as_bytes().to_vec();
+    let hops = parse_trace_output("127.0.0.1".parse().unwrap(), &raw, 30).unwrap();
+    let measurement = TraceMeasurement {
+        target: "127.0.0.1".to_string(),
+        method: "ICMP_TRACERT".to_string(),
+        outcome: "REACHED".to_string(),
+        hops,
+        elapsed_ms: 12,
+        exit_code: Some(0),
+        raw_stdout: raw,
+        raw_stderr: Vec::new(),
+        output_truncated: true,
+        limitations: Vec::new(),
+    };
+    let r = trace_to_quick_result(&ctx, &measurement);
+    assert!(
+        r.is_err() || r.unwrap().status != QuickStatus::PASS,
+        "출력이 절삭된 REACHED는 PASS로 승격 금지"
+    );
+}
+
+#[test]
+fn test_boundary_wrong_method_never_passes() {
+    let ctx = create_test_context("127.0.0.1");
+    let raw = SYNTHETIC_FIXTURE_IPV4_ENGLISH_REACHED.as_bytes().to_vec();
+    let hops = parse_trace_output("127.0.0.1".parse().unwrap(), &raw, 30).unwrap();
+    let measurement = TraceMeasurement {
+        target: "127.0.0.1".to_string(),
+        method: "TCP".to_string(),
+        outcome: "REACHED".to_string(),
+        hops,
+        elapsed_ms: 12,
+        exit_code: Some(0),
+        raw_stdout: raw,
+        raw_stderr: Vec::new(),
+        output_truncated: false,
+        limitations: Vec::new(),
+    };
+    let r = trace_to_quick_result(&ctx, &measurement);
+    assert!(
+        r.is_err() || r.unwrap().status != QuickStatus::PASS,
+        "잘못된 method는 PASS로 승격 금지"
+    );
+}
+
+#[test]
+fn test_boundary_nonzero_exit_never_passes() {
+    let ctx = create_test_context("127.0.0.1");
+    let raw = SYNTHETIC_FIXTURE_IPV4_ENGLISH_REACHED.as_bytes().to_vec();
+    let hops = parse_trace_output("127.0.0.1".parse().unwrap(), &raw, 30).unwrap();
+    let measurement = TraceMeasurement {
+        target: "127.0.0.1".to_string(),
+        method: "ICMP_TRACERT".to_string(),
+        outcome: "REACHED".to_string(),
+        hops,
+        elapsed_ms: 12,
+        exit_code: Some(1),
+        raw_stdout: raw,
+        raw_stderr: Vec::new(),
+        output_truncated: false,
+        limitations: Vec::new(),
+    };
+    let r = trace_to_quick_result(&ctx, &measurement);
+    assert!(
+        r.is_err() || r.unwrap().status != QuickStatus::PASS,
+        "비정상 종료 코드의 REACHED는 PASS로 승격 금지"
+    );
+}
+
+#[test]
+fn test_boundary_parser_missing_ms_units_is_rejected() {
+    let target: IpAddr = "127.0.0.1".parse().unwrap();
+    let res = parse_trace_output(target, b"1 1 2 3 127.0.0.1\r\n", 30);
+    assert!(res.is_err(), "단위 없는 임의 숫자를 실측 RTT로 승격 금지");
+}
+
+#[test]
+fn test_boundary_third_rtt_unit_is_required() {
+    let target: IpAddr = "127.0.0.1".parse().unwrap();
+    let res = parse_trace_output(target, b"1 10 ms 20 ms 30 127.0.0.1\n", 30);
+    assert!(res.is_err(), "세 번째 RTT 단위가 누락되면 거절되어야 함");
+}
+
+#[test]
+fn test_boundary_ttl_overflow_is_not_a_header() {
+    let target: IpAddr = "127.0.0.1".parse().unwrap();
+    let res = parse_trace_output(
+        target,
+        b"1 1 ms 1 ms 1 ms 127.0.0.1\n256 1 ms 1 ms 1 ms 10.0.0.1\n",
+        30,
+    );
+    assert!(
+        res.is_err(),
+        "256 TTL 오버플로우는 헤더가 아니며 에러여야 함"
+    );
+}
+
+#[test]
+fn test_boundary_fourth_timeout_sample_is_rejected() {
+    let target: IpAddr = "127.0.0.1".parse().unwrap();
+    let res = parse_trace_output(target, b"1 * * * 1 ms 127.0.0.1\n", 30);
+    assert!(
+        res.is_err(),
+        "전면 타임아웃 뒤 추가 샘플 및 IP는 거부되어야 함"
+    );
+}
+
+#[test]
+fn test_boundary_invalid_incomplete_hop_is_not_observed() {
+    let ctx = create_test_context("127.0.0.1");
+    let raw = SYNTHETIC_FIXTURE_IPV4_ENGLISH_REACHED.as_bytes().to_vec();
+    let mut hops = parse_trace_output("127.0.0.1".parse().unwrap(), &raw, 30).unwrap();
+    hops[0].address = Some(String::new()); // 빈 문자열 주소로 손상
+
+    let measurement = TraceMeasurement {
+        target: "127.0.0.1".to_string(),
+        method: "ICMP_TRACERT".to_string(),
+        outcome: "INCOMPLETE".to_string(),
+        hops,
+        elapsed_ms: 12,
+        exit_code: Some(0),
+        raw_stdout: raw,
+        raw_stderr: Vec::new(),
+        output_truncated: false,
+        limitations: Vec::new(),
+    };
+    let r = trace_to_quick_result(&ctx, &measurement);
+    assert!(
+        r.is_err() || r.unwrap().evidence_level != EvidenceLevel::OBSERVED,
+        "불량 주소를 가진 INCOMPLETE는 OBSERVED로 승격 금지"
+    );
+}
+
+#[test]
+fn test_boundary_ttl_plus_sign_rejected() {
+    let target: IpAddr = "127.0.0.1".parse().unwrap();
+    let res = parse_trace_output(target, b"+1 1 ms 1 ms 1 ms 127.0.0.1\n", 30);
+    assert!(res.is_err(), "+ 부호가 포함된 TTL 토큰은 거부되어야 함");
+}
+
+#[test]
+fn test_boundary_rtt_plus_sign_rejected() {
+    let target: IpAddr = "127.0.0.1".parse().unwrap();
+    let res = parse_trace_output(target, b"1 +1 ms 1 ms 1 ms 127.0.0.1\n", 30);
+    assert!(res.is_err(), "+ 부호가 포함된 RTT 수치는 거부되어야 함");
+}
+
+#[test]
+fn test_boundary_max_hops_range_validation() {
+    let target: IpAddr = "127.0.0.1".parse().unwrap();
+    assert!(parse_trace_output(target, b"1 1 ms 1 ms 1 ms 127.0.0.1\n", 0).is_err());
+    assert!(parse_trace_output(target, b"1 1 ms 1 ms 1 ms 127.0.0.1\n", 31).is_err());
+}
+
+#[test]
+fn test_boundary_raw_hops_mismatch_rejected() {
+    let ctx = create_test_context("127.0.0.1");
+    let measurement = TraceMeasurement {
+        target: "127.0.0.1".to_string(),
+        method: "ICMP_TRACERT".to_string(),
+        outcome: "REACHED".to_string(),
+        hops: vec![TraceHop {
+            ttl: 1,
+            address: Some("127.0.0.1".to_string()),
+            probe_times_ms: vec![Some(1), Some(1), Some(1)],
+            rtt_less_than: vec![true, true, true],
+            raw_line: "1 1 ms 1 ms 1 ms 127.0.0.1".to_string(),
+        }],
+        elapsed_ms: 12,
+        exit_code: Some(0),
+        raw_stdout: b"Trace complete.".to_vec(), // 불일치 raw_stdout
+        raw_stderr: Vec::new(),
+        output_truncated: false,
+        limitations: Vec::new(),
+    };
+    let r = trace_to_quick_result(&ctx, &measurement);
+    assert!(
+        r.is_err() || r.unwrap().status != QuickStatus::PASS,
+        "raw_stdout과 hops가 불일치하는 REACHED는 PASS로 승격 금지"
+    );
 }
 
 /// 실제 소유 IPv4 루프백 통합 진단 시험.
