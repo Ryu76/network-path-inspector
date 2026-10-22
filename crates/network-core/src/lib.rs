@@ -20,7 +20,9 @@
 
 pub mod host;
 pub mod icmp;
+pub mod measurements;
 pub mod quick;
+pub mod targets;
 pub mod tcp;
 
 pub use host::{
@@ -36,7 +38,8 @@ pub use quick::{
 };
 pub use tcp::{TcpMeasurement, TcpOutcome, classify_tcp_error, connect_once};
 
-// QG2 실행기 API는 전용 writer에서 생성하며 두 의존 모듈은 보존커밋 사본이다.
-pub mod measurements;
 pub mod runner;
-pub mod targets;
+
+// 두 제품이 공유하는 OS resolver 단일 구현. DNS 서버/RR/TTL 관측을 의미하지 않는다.
+pub use network_resolver as dns_engine;
+pub mod dns;

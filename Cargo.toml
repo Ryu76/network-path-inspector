@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/npi-core", "crates/npi-probes", "crates/network-core"]
+members = ["crates/npi-core", "crates/npi-probes", "crates/network-core", "crates/network-resolver"]
 resolver = "3"
 
 [workspace.package]
