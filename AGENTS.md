@@ -8,7 +8,3 @@
 - 공통 contracts/g1-interface-contract.json 그대로 준수. 임의 모델/필드/상태/기능ID 변경 금지. G2~G8 프로브/캡처/보고/설치 구현은 G0/G1 검증 전 보류.
 - 결과 상태 SKIPPED_BY_USER, UNAVAILABLE, ERROR, CANCELLED는 PASS/FAIL로 위장하지 않는다. 실패 기대값을 지우지 않는다.
 - 한국어 UI/설명 주석, UTF-8·마지막개행·후행공백 없음. 완료 주장 대신 실제 변경 경로·부모 검증 필요사항 반환.
-
-## QG0/QG1 승인 범위
-- 같은 프로젝트의 Part B Network Quick Check를 별도 제품으로 준비한다. 원문 docs/requirements/Network_Path_Inspector_Harness_PRD_v1.2.md와 .harness/references/qg1-contract.json 준수.
-- 기존 Inspector 기능/DTO/프로브/스키마/PRD.md 바이트 변경 금지. Quick Check에 웹뷰/Npcap/Agent/PDF/SQLite 의존성 금지.
