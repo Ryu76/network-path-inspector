@@ -292,6 +292,119 @@ fn drain_pipe_limited<P: PipeCollector>(
     Ok(false)
 }
 
+/// 양쪽 파이프의 남은 가용 데이터를 상한 내에서 드레인하고 발생한 오류나 상한 미수집을 outcome 및 limitations에 반영합니다.
+fn drain_pipes_and_evaluate<P1: PipeCollector, P2: PipeCollector>(
+    stdout_pipe: &mut P1,
+    stderr_pipe: &mut P2,
+    raw_stdout: &mut Vec<u8>,
+    raw_stderr: &mut Vec<u8>,
+    output_truncated: &mut bool,
+    outcome_opt: &mut Option<String>,
+    limitations: &mut Vec<String>,
+) {
+    match drain_pipe_limited(
+        stdout_pipe,
+        raw_stdout,
+        MAX_OUTPUT_BUFFER_BYTES,
+        output_truncated,
+        10,
+    ) {
+        Ok(true) => {}
+        Ok(false) => {
+            limitations.push(
+                "표준 출력 파이프 가용 잔량을 완전히 수집하지 못했습니다 (상한 도달).".to_string(),
+            );
+            if outcome_opt.is_none() {
+                *outcome_opt = Some("LOCAL_ERROR".to_string());
+            }
+        }
+        Err((code, msg)) => {
+            limitations.push(format!(
+                "표준 출력 잔량 수집 중 오류 (코드 {}): {msg}",
+                code.map_or_else(|| "미확인".to_string(), |value| value.to_string())
+            ));
+            if outcome_opt.is_none() {
+                *outcome_opt = Some("LOCAL_ERROR".to_string());
+            }
+        }
+    }
+
+    match drain_pipe_limited(
+        stderr_pipe,
+        raw_stderr,
+        MAX_OUTPUT_BUFFER_BYTES,
+        output_truncated,
+        10,
+    ) {
+        Ok(true) => {}
+        Ok(false) => {
+            limitations.push(
+                "표준 에러 파이프 가용 잔량을 완전히 수집하지 못했습니다 (상한 도달).".to_string(),
+            );
+            if outcome_opt.is_none() {
+                *outcome_opt = Some("LOCAL_ERROR".to_string());
+            }
+        }
+        Err((code, msg)) => {
+            limitations.push(format!(
+                "표준 에러 잔량 수집 중 오류 (코드 {}): {msg}",
+                code.map_or_else(|| "미확인".to_string(), |value| value.to_string())
+            ));
+            if outcome_opt.is_none() {
+                *outcome_opt = Some("LOCAL_ERROR".to_string());
+            }
+        }
+    }
+}
+
+/// 양쪽 파이프 드레인과 상태 평가를 거쳐 최종 TraceMeasurement를 구성하는 공통 종결 헬퍼.
+fn finalize_trace_measurement<P1: PipeCollector, P2: PipeCollector>(
+    target: IpAddr,
+    max_hops: u8,
+    exit_code: Option<i32>,
+    elapsed_ms: u64,
+    pipes: (&mut P1, &mut P2),
+    buffers: (&mut Vec<u8>, &mut Vec<u8>, &mut bool),
+    state: (&mut Option<String>, &mut Vec<String>),
+) -> TraceMeasurement {
+    let (stdout_pipe, stderr_pipe) = pipes;
+    let (raw_stdout, raw_stderr, output_truncated) = buffers;
+    let (outcome_opt, limitations) = state;
+
+    drain_pipes_and_evaluate(
+        stdout_pipe,
+        stderr_pipe,
+        raw_stdout,
+        raw_stderr,
+        output_truncated,
+        outcome_opt,
+        limitations,
+    );
+
+    let (outcome, hops) = evaluate_trace_outcome(
+        target,
+        max_hops,
+        exit_code,
+        *output_truncated,
+        outcome_opt.clone(),
+        raw_stdout,
+        limitations,
+    );
+
+    TraceMeasurement {
+        target: target.to_string(),
+        method: "ICMP_TRACERT".to_string(),
+        outcome,
+        hops,
+        elapsed_ms,
+        exit_code,
+        raw_stdout: raw_stdout.clone(),
+        raw_stderr: raw_stderr.clone(),
+        output_truncated: *output_truncated,
+        limitations: limitations.clone(),
+    }
+}
+
 /// 토큰 시퀀스로부터 단일 RTT 샘플을 추출하는 헬퍼 함수.
 ///
 /// `<1 ms`, `<1ms`, `< 1 ms`, `15 ms`, `15ms`, `*` 등 OS 유틸리티 출력의 공백 변종을 파싱합니다.
@@ -451,14 +564,30 @@ pub fn parse_trace_output(
         }
 
         let first_tok = tokens[0];
+
+        // 음수 및 부호 숫자 후보를 명백한 hop 오류로 감지하고 안내문으로 건너뛰지 않음
+        if first_tok.starts_with('-')
+            && first_tok.len() > 1
+            && first_tok[1..].chars().all(|c| c.is_ascii_digit())
+        {
+            errors.push(format!(
+                "TTL 수치에 음수는 허용되지 않습니다: '{first_tok}'"
+            ));
+            continue;
+        }
+
+        if first_tok.starts_with('+')
+            && first_tok.len() > 1
+            && first_tok[1..].chars().all(|c| c.is_ascii_digit())
+        {
+            errors.push(format!(
+                "TTL 수치에 '+' 부호는 허용되지 않습니다: '{first_tok}'"
+            ));
+            continue;
+        }
+
         let is_numeric = !first_tok.is_empty() && first_tok.chars().all(|c| c.is_ascii_digit());
         if !is_numeric {
-            if first_tok.starts_with('+') && first_tok[1..].chars().all(|c| c.is_ascii_digit()) {
-                errors.push(format!(
-                    "TTL 수치에 '+' 부호는 허용되지 않습니다: '{first_tok}'"
-                ));
-                continue;
-            }
             continue;
         }
 
@@ -952,7 +1081,7 @@ mod native {
 
     use super::{
         MAX_OUTPUT_BUFFER_BYTES, PipeCollector, PipeStatus, TraceMeasurement, TraceOptions,
-        collect_from_pipe, drain_pipe_limited, evaluate_trace_outcome,
+        collect_from_pipe, finalize_trace_measurement,
     };
 
     /// Win32 HANDLE에 대한 RAII 래퍼 구조체.
@@ -1205,25 +1334,7 @@ mod native {
             }
         };
 
-        let child_handle = child.as_raw_handle() as HANDLE;
-        let assign_res = unsafe { AssignProcessToJobObject(job.0, child_handle) };
-        if assign_res == 0 {
-            terminate_and_cleanup_child(&mut child, &mut limitations);
-            limitations.push("자식 프로세스를 Job Object에 할당하는 데 실패했습니다.".to_string());
-            return TraceMeasurement {
-                target: target.to_string(),
-                method: "ICMP_TRACERT".to_string(),
-                outcome: "LOCAL_ERROR".to_string(),
-                hops: Vec::new(),
-                elapsed_ms: start.elapsed().as_millis() as u64,
-                exit_code: None,
-                raw_stdout: Vec::new(),
-                raw_stderr: Vec::new(),
-                output_truncated: false,
-                limitations,
-            };
-        }
-
+        // 파이프 소유권을 Job 할당 이전에 안전하게 확보하여 모든 종료 경로에서 가용 잔량 수집을 보장
         let child_stdout = child.stdout.take().expect("stdout pipe 확보 실패");
         let child_stderr = child.stderr.take().expect("stderr pipe 확보 실패");
         let stdout_h = child_stdout.as_raw_handle() as HANDLE;
@@ -1237,6 +1348,24 @@ mod native {
         let mut output_truncated = false;
         let mut outcome_opt: Option<String> = None;
         let mut exit_code: Option<i32> = None;
+
+        let child_handle = child.as_raw_handle() as HANDLE;
+        let assign_res = unsafe { AssignProcessToJobObject(job.0, child_handle) };
+        if assign_res == 0 {
+            terminate_and_cleanup_child(&mut child, &mut limitations);
+            limitations.push("자식 프로세스를 Job Object에 할당하는 데 실패했습니다.".to_string());
+            outcome_opt = Some("LOCAL_ERROR".to_string());
+            let elapsed_ms = start.elapsed().as_millis() as u64;
+            return finalize_trace_measurement(
+                target,
+                options.max_hops,
+                exit_code,
+                elapsed_ms,
+                (&mut stdout_pipe, &mut stderr_pipe),
+                (&mut raw_stdout, &mut raw_stderr, &mut output_truncated),
+                (&mut outcome_opt, &mut limitations),
+            );
+        }
 
         loop {
             let elapsed_ms = start.elapsed().as_millis() as u64;
@@ -1313,74 +1442,17 @@ mod native {
             exit_code = st.code();
         }
 
-        match drain_pipe_limited(
-            &mut stdout_pipe,
-            &mut raw_stdout,
-            MAX_OUTPUT_BUFFER_BYTES,
-            &mut output_truncated,
-            10,
-        ) {
-            Ok(true) => {}
-            Ok(false) => {
-                limitations.push(
-                    "표준 출력 파이프 가용 잔량을 완전히 수집하지 못했습니다 (상한 도달)."
-                        .to_string(),
-                );
-            }
-            Err((code, msg)) => {
-                limitations.push(format!(
-                    "표준 출력 잔량 수집 중 오류 (코드 {}): {msg}",
-                    code.map_or_else(|| "미확인".to_string(), |value| value.to_string())
-                ));
-            }
-        }
-
-        match drain_pipe_limited(
-            &mut stderr_pipe,
-            &mut raw_stderr,
-            MAX_OUTPUT_BUFFER_BYTES,
-            &mut output_truncated,
-            10,
-        ) {
-            Ok(true) => {}
-            Ok(false) => {
-                limitations.push(
-                    "표준 에러 파이프 가용 잔량을 완전히 수집하지 못했습니다 (상한 도달)."
-                        .to_string(),
-                );
-            }
-            Err((code, msg)) => {
-                limitations.push(format!(
-                    "표준 에러 잔량 수집 중 오류 (코드 {}): {msg}",
-                    code.map_or_else(|| "미확인".to_string(), |value| value.to_string())
-                ));
-            }
-        }
-
         let elapsed_ms = start.elapsed().as_millis() as u64;
 
-        let (outcome, hops) = evaluate_trace_outcome(
+        finalize_trace_measurement(
             target,
             options.max_hops,
             exit_code,
-            output_truncated,
-            outcome_opt,
-            &raw_stdout,
-            &mut limitations,
-        );
-
-        TraceMeasurement {
-            target: target.to_string(),
-            method: "ICMP_TRACERT".to_string(),
-            outcome,
-            hops,
             elapsed_ms,
-            exit_code,
-            raw_stdout,
-            raw_stderr,
-            output_truncated,
-            limitations,
-        }
+            (&mut stdout_pipe, &mut stderr_pipe),
+            (&mut raw_stdout, &mut raw_stderr, &mut output_truncated),
+            (&mut outcome_opt, &mut limitations),
+        )
     }
 }
 
@@ -1710,5 +1782,252 @@ mod tests {
         assert!(truncated);
         assert_eq!(buf.len(), 32768);
         assert_eq!(pipe.read_pos, 40000);
+    }
+
+    #[test]
+    fn test_terminal_stdout_drain_peek_error_prevents_reached() {
+        let target: IpAddr = "127.0.0.1".parse().unwrap();
+        let valid_reached_stdout = b"1 1 ms 1 ms 1 ms 127.0.0.1\r\n".to_vec();
+
+        // 이미 루프 중에 유효 도달 raw를 수집한 상태를 모의
+        let mut raw_stdout = valid_reached_stdout.clone();
+        let mut raw_stderr = Vec::new();
+        let mut output_truncated = false;
+        let mut outcome_opt: Option<String> = None;
+        let mut limitations = vec!["초기 안내문".to_string()];
+
+        // stdout 파이프의 최종 drain 시점에 Peek 오류(코드 5, Access Denied) 모의
+        let mut stdout_pipe = MockPipe::new(
+            vec![PipeStatus::Error(5, "PeekNamedPipe 실패".to_string())],
+            Vec::new(),
+        );
+        let mut stderr_pipe = MockPipe::new(vec![PipeStatus::Eof], Vec::new());
+
+        let measurement = finalize_trace_measurement(
+            target,
+            30,
+            Some(0),
+            50,
+            (&mut stdout_pipe, &mut stderr_pipe),
+            (&mut raw_stdout, &mut raw_stderr, &mut output_truncated),
+            (&mut outcome_opt, &mut limitations),
+        );
+
+        // 정상 exit 0과 도달 raw가 있었음에도 terminal stdout drain 오류로 LOCAL_ERROR 강제
+        assert_eq!(measurement.outcome, "LOCAL_ERROR");
+        assert!(measurement.hops.is_empty());
+        assert_eq!(measurement.exit_code, Some(0));
+        assert_eq!(measurement.raw_stdout, valid_reached_stdout);
+        assert!(
+            measurement
+                .limitations
+                .iter()
+                .any(|l| l.contains("표준 출력 잔량 수집 중 오류 (코드 5)"))
+        );
+
+        // trace_to_quick_result에 넘겨도 절대 PASS로 승격되지 않음을 증명
+        let ctx = QuickContext {
+            session_id: "test-sess".to_string(),
+            timestamp_iso8601: None,
+            source_host: None,
+            target_host: "127.0.0.1".to_string(),
+            target_port: 80,
+        };
+        let q_res = trace_to_quick_result(&ctx, &measurement).expect("어댑터 변환 성공");
+        assert_eq!(q_res.status, QuickStatus::UNKNOWN);
+        assert_eq!(q_res.evidence_level, EvidenceLevel::UNKNOWN);
+    }
+
+    #[test]
+    fn test_terminal_stderr_drain_read_error_prevents_reached() {
+        let target: IpAddr = "127.0.0.1".parse().unwrap();
+        let valid_reached_stdout = b"1 1 ms 1 ms 1 ms 127.0.0.1\r\n".to_vec();
+
+        let mut raw_stdout = valid_reached_stdout.clone();
+        let mut raw_stderr = Vec::new();
+        let mut output_truncated = false;
+        let mut outcome_opt: Option<String> = None;
+        let mut limitations = Vec::new();
+
+        let mut stdout_pipe = MockPipe::new(vec![PipeStatus::Eof], Vec::new());
+        // stderr 파이프의 최종 drain 시점에 read 오류(코드 14) 모의
+        let mut stderr_pipe = MockPipe::new(vec![PipeStatus::Data(4)], vec![1, 2, 3, 4]);
+        stderr_pipe.fail_read = true;
+        stderr_pipe.read_error_code = Some(14);
+
+        let measurement = finalize_trace_measurement(
+            target,
+            30,
+            Some(0),
+            40,
+            (&mut stdout_pipe, &mut stderr_pipe),
+            (&mut raw_stdout, &mut raw_stderr, &mut output_truncated),
+            (&mut outcome_opt, &mut limitations),
+        );
+
+        assert_eq!(measurement.outcome, "LOCAL_ERROR");
+        assert!(measurement.hops.is_empty());
+        assert_eq!(measurement.raw_stdout, valid_reached_stdout);
+        assert!(
+            measurement
+                .limitations
+                .iter()
+                .any(|l| l.contains("표준 에러 잔량 수집 중 오류 (코드 14)"))
+        );
+    }
+
+    #[test]
+    fn test_terminal_drain_error_without_os_code_preserves_unknown_tag() {
+        let target: IpAddr = "127.0.0.1".parse().unwrap();
+        let mut raw_stdout = b"1 1 ms 1 ms 1 ms 127.0.0.1\r\n".to_vec();
+        let mut raw_stderr = Vec::new();
+        let mut output_truncated = false;
+        let mut outcome_opt: Option<String> = None;
+        let mut limitations = Vec::new();
+
+        // read_error_code가 None인 합성 오류
+        let mut stdout_pipe = MockPipe::new(vec![PipeStatus::Data(2)], vec![1, 2]);
+        stdout_pipe.fail_read = true;
+        stdout_pipe.read_error_code = None;
+        let mut stderr_pipe = MockPipe::new(vec![PipeStatus::Eof], Vec::new());
+
+        let measurement = finalize_trace_measurement(
+            target,
+            30,
+            Some(0),
+            30,
+            (&mut stdout_pipe, &mut stderr_pipe),
+            (&mut raw_stdout, &mut raw_stderr, &mut output_truncated),
+            (&mut outcome_opt, &mut limitations),
+        );
+
+        assert_eq!(measurement.outcome, "LOCAL_ERROR");
+        assert!(
+            measurement
+                .limitations
+                .iter()
+                .any(|l| l.contains("표준 출력 잔량 수집 중 오류 (코드 미확인)"))
+        );
+    }
+
+    #[test]
+    fn test_terminal_drain_uncollected_bound_prevents_reached() {
+        let target: IpAddr = "127.0.0.1".parse().unwrap();
+        let mut raw_stdout = b"1 1 ms 1 ms 1 ms 127.0.0.1\r\n".to_vec();
+        let mut raw_stderr = Vec::new();
+        let mut output_truncated = false;
+        let mut outcome_opt: Option<String> = None;
+        let mut limitations = Vec::new();
+
+        // 10회 반복을 초과하여 계속 데이터가 남아있는 모의 파이프 (max_rounds 10 초과)
+        let mut infinite_avail = Vec::new();
+        for _ in 0..20 {
+            infinite_avail.push(PipeStatus::Data(100));
+        }
+        let mut stdout_pipe = MockPipe::new(infinite_avail, vec![b'A'; 2000]);
+        let mut stderr_pipe = MockPipe::new(vec![PipeStatus::Eof], Vec::new());
+
+        let measurement = finalize_trace_measurement(
+            target,
+            30,
+            Some(0),
+            60,
+            (&mut stdout_pipe, &mut stderr_pipe),
+            (&mut raw_stdout, &mut raw_stderr, &mut output_truncated),
+            (&mut outcome_opt, &mut limitations),
+        );
+
+        assert_eq!(measurement.outcome, "LOCAL_ERROR");
+        assert!(
+            measurement
+                .limitations
+                .iter()
+                .any(|l| l.contains("가용 잔량을 완전히 수집하지 못했습니다 (상한 도달)"))
+        );
+    }
+
+    #[test]
+    fn test_terminal_drain_cancelled_and_timed_out_not_promoted_to_success() {
+        let target: IpAddr = "127.0.0.1".parse().unwrap();
+
+        // CANCELLED 케이스
+        let mut raw_stdout = b"1 1 ms 1 ms 1 ms 127.0.0.1\r\n".to_vec();
+        let mut raw_stderr = Vec::new();
+        let mut output_truncated = false;
+        let mut outcome_opt = Some("CANCELLED".to_string());
+        let mut limitations = Vec::new();
+        let mut stdout_pipe = MockPipe::new(vec![PipeStatus::Eof], Vec::new());
+        let mut stderr_pipe = MockPipe::new(vec![PipeStatus::Eof], Vec::new());
+
+        let measurement = finalize_trace_measurement(
+            target,
+            30,
+            Some(0),
+            10,
+            (&mut stdout_pipe, &mut stderr_pipe),
+            (&mut raw_stdout, &mut raw_stderr, &mut output_truncated),
+            (&mut outcome_opt, &mut limitations),
+        );
+        assert_eq!(measurement.outcome, "CANCELLED");
+
+        // TIMED_OUT 케이스
+        let mut outcome_opt2 = Some("TIMED_OUT".to_string());
+        let mut stdout_pipe2 = MockPipe::new(vec![PipeStatus::Eof], Vec::new());
+        let mut stderr_pipe2 = MockPipe::new(vec![PipeStatus::Eof], Vec::new());
+        let measurement2 = finalize_trace_measurement(
+            target,
+            30,
+            Some(0),
+            10000,
+            (&mut stdout_pipe2, &mut stderr_pipe2),
+            (&mut raw_stdout, &mut raw_stderr, &mut output_truncated),
+            (&mut outcome_opt2, &mut limitations),
+        );
+        assert_eq!(measurement2.outcome, "TIMED_OUT");
+    }
+
+    #[test]
+    fn test_job_assignment_failure_preserves_available_pipe_tail_and_local_error() {
+        let target: IpAddr = "127.0.0.1".parse().unwrap();
+        let mut raw_stdout = Vec::new();
+        let mut raw_stderr = Vec::new();
+        let mut output_truncated = false;
+        let mut outcome_opt = Some("LOCAL_ERROR".to_string());
+        let mut limitations =
+            vec!["자식 프로세스를 Job Object에 할당하는 데 실패했습니다.".to_string()];
+
+        // Job 할당 직후 프로세스가 kill되기 전 이미 버퍼에 기록해둔 stdout 및 stderr 모의
+        let mut stdout_pipe = MockPipe::new(
+            vec![PipeStatus::Data(14), PipeStatus::Eof],
+            b"partial stdout".to_vec(),
+        );
+        let mut stderr_pipe = MockPipe::new(
+            vec![PipeStatus::Data(14), PipeStatus::Eof],
+            b"partial stderr".to_vec(),
+        );
+
+        let measurement = finalize_trace_measurement(
+            target,
+            30,
+            None,
+            5,
+            (&mut stdout_pipe, &mut stderr_pipe),
+            (&mut raw_stdout, &mut raw_stderr, &mut output_truncated),
+            (&mut outcome_opt, &mut limitations),
+        );
+
+        // fail-closed LOCAL_ERROR 확인
+        assert_eq!(measurement.outcome, "LOCAL_ERROR");
+        assert!(measurement.hops.is_empty());
+        assert_eq!(measurement.exit_code, None);
+        // 가용 잔량이 빈 벡터가 아니라 온전히 보존되었는지 검증 (고정 빈 raw 반환 제거)
+        assert_eq!(measurement.raw_stdout, b"partial stdout");
+        assert_eq!(measurement.raw_stderr, b"partial stderr");
+        assert!(
+            measurement
+                .limitations
+                .iter()
+                .any(|l| l.contains("Job Object에 할당하는 데 실패"))
+        );
     }
 }

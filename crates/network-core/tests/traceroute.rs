@@ -725,6 +725,103 @@ fn test_boundary_raw_hops_mismatch_rejected() {
     );
 }
 
+#[test]
+fn test_boundary_negative_ttl_is_not_a_header() {
+    let target: IpAddr = "127.0.0.1".parse().unwrap();
+    let bad_output = b"1 1 ms 1 ms 1 ms 127.0.0.1\n-1 1 ms 1 ms 1 ms 10.0.0.1\n";
+    let res = parse_trace_output(target, bad_output, 30);
+    assert!(
+        res.is_err(),
+        "정상 도달 행 뒤에 붙은 음수 TTL(-1)은 안내문으로 무시되지 않고 거절되어야 함"
+    );
+}
+
+#[test]
+fn test_boundary_out_of_bound_negative_ttl_rejected() {
+    let target: IpAddr = "127.0.0.1".parse().unwrap();
+    let bad_output = b"1 1 ms 1 ms 1 ms 127.0.0.1\n-256 1 ms 1 ms 1 ms 10.0.0.1\n";
+    let res = parse_trace_output(target, bad_output, 30);
+    assert!(
+        res.is_err(),
+        "정상 도달 행 뒤에 붙은 범위 밖 음수 TTL(-256)은 안내문으로 무시되지 않고 거절되어야 함"
+    );
+
+    let bad_output_large = b"1 1 ms 1 ms 1 ms 127.0.0.1\n-99999 1 ms 1 ms 1 ms 10.0.0.1\n";
+    let res_large = parse_trace_output(target, bad_output_large, 30);
+    assert!(
+        res_large.is_err(),
+        "정상 도달 행 뒤에 붙은 큰 음수 TTL(-99999)은 안내문으로 무시되지 않고 거절되어야 함"
+    );
+}
+
+#[test]
+fn test_boundary_signed_positive_ttl_candidate_after_valid_hop_rejected() {
+    let target: IpAddr = "127.0.0.1".parse().unwrap();
+    let bad_output = b"1 1 ms 1 ms 1 ms 127.0.0.1\n+2 1 ms 1 ms 1 ms 10.0.0.1\n";
+    let res = parse_trace_output(target, bad_output, 30);
+    assert!(
+        res.is_err(),
+        "정상 도달 행 뒤에 붙은 +부호 TTL(+2)은 안내문으로 무시되지 않고 거절되어야 함"
+    );
+
+    let bad_output_overflow = b"1 1 ms 1 ms 1 ms 127.0.0.1\n+256 1 ms 1 ms 1 ms 10.0.0.1\n";
+    let res_overflow = parse_trace_output(target, bad_output_overflow, 30);
+    assert!(
+        res_overflow.is_err(),
+        "정상 도달 행 뒤에 붙은 +부호 오버플로우 TTL(+256)은 거절되어야 함"
+    );
+}
+
+#[test]
+fn test_boundary_terminal_drain_error_measurement_never_passes() {
+    let ctx = create_test_context("127.0.0.1");
+    let raw = SYNTHETIC_FIXTURE_IPV4_ENGLISH_REACHED.as_bytes().to_vec();
+    let measurement = TraceMeasurement {
+        target: "127.0.0.1".to_string(),
+        method: "ICMP_TRACERT".to_string(),
+        outcome: "LOCAL_ERROR".to_string(),
+        hops: Vec::new(),
+        elapsed_ms: 15,
+        exit_code: Some(0),
+        raw_stdout: raw,
+        raw_stderr: Vec::new(),
+        output_truncated: false,
+        limitations: vec!["표준 출력 잔량 수집 중 오류 (코드 5): Access Denied".to_string()],
+    };
+
+    let r = trace_to_quick_result(&ctx, &measurement).expect("어댑터 변환은 유효한 결과 객체 생성");
+    assert_ne!(
+        r.status,
+        QuickStatus::PASS,
+        "최종 드레인 오류로 LOCAL_ERROR가 된 측정은 절대 PASS로 승격 금지"
+    );
+    assert_eq!(r.status, QuickStatus::UNKNOWN);
+    assert_eq!(r.evidence_level, EvidenceLevel::UNKNOWN);
+    assert_eq!(r.details["outcome"], "LOCAL_ERROR");
+}
+
+#[test]
+fn test_boundary_job_assignment_failure_measurement_never_passes() {
+    let ctx = create_test_context("127.0.0.1");
+    let measurement = TraceMeasurement {
+        target: "127.0.0.1".to_string(),
+        method: "ICMP_TRACERT".to_string(),
+        outcome: "LOCAL_ERROR".to_string(),
+        hops: Vec::new(),
+        elapsed_ms: 5,
+        exit_code: None,
+        raw_stdout: b"partial output".to_vec(),
+        raw_stderr: b"partial err".to_vec(),
+        output_truncated: false,
+        limitations: vec!["자식 프로세스를 Job Object에 할당하는 데 실패했습니다.".to_string()],
+    };
+
+    let r = trace_to_quick_result(&ctx, &measurement).expect("어댑터 변환 성공");
+    assert_ne!(r.status, QuickStatus::PASS);
+    assert_eq!(r.status, QuickStatus::UNKNOWN);
+    assert_eq!(r.evidence_level, EvidenceLevel::UNKNOWN);
+}
+
 /// 실제 소유 IPv4 루프백 통합 진단 시험.
 ///
 /// 운영체제 기본 `tracert.exe` 프로세스를 실제로 실행하므로 기본 단위 시험에서는 무시(`#[ignore]`)되며,
