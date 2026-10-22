@@ -127,11 +127,11 @@ fn write_static_stderr(stderr: &mut dyn Write, message: &str) -> bool {
         .is_ok()
 }
 
-/// 주입 가능한 worker 함수를 사용하여 진입점을 실행합니다.
+/// 주입 가능한 worker 함수를 사용하여 진입점을 실행하는 내부 헬퍼.
 ///
 /// 내부 단위 테스트에서 실제 OS getaddrinfo 호출 없이 순수 모의 worker 함수를 연결하여
 /// 분기 및 I/O 동작을 완벽하게 검증할 수 있도록 지원합니다.
-pub fn entry_with_worker<F>(
+fn entry_with_worker<F>(
     args: &[OsString],
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
@@ -169,10 +169,9 @@ where
         EntryMode::DnsWorker { host, port_arg } => {
             let payload = worker_fn(&host, &port_arg);
             let line = network_core::dns_engine::worker_output_line(&payload);
-            let bytes = line.as_bytes();
 
             // UTF-8 바이트 크기 상한(16KiB) 및 정확한 단일 행 + 최종 LF('\n') 구조 검증
-            let is_valid_line = bytes.len() <= network_core::dns_engine::MAX_PAYLOAD_BYTES
+            let is_valid_line = line.len() <= network_core::dns_engine::MAX_PAYLOAD_BYTES
                 && line.ends_with('\n')
                 && !line[..line.len() - 1].contains('\n')
                 && !line.contains('\r');
@@ -182,7 +181,11 @@ where
                 return 1;
             }
 
-            if stdout.write_all(bytes).and_then(|_| stdout.flush()).is_ok() {
+            if stdout
+                .write_all(line.as_bytes())
+                .and_then(|_| stdout.flush())
+                .is_ok()
+            {
                 0
             } else {
                 let _ = write_static_stderr(stderr, OUTPUT_FAILURE_STDERR);
@@ -206,13 +209,13 @@ pub fn entry(args: &[OsString], stdout: &mut dyn Write, stderr: &mut dyn Write) 
     )
 }
 
-/// 현재 실행 중인 프로세스의 절대 실행 파일 경로로 `NativeDnsProbeBackend`를 생성합니다.
+/// 현재 실행 파일 경로 조회 결과로부터 `NativeDnsProbeBackend`를 생성하는 내부 헬퍼.
 ///
-/// `current_exe()` 실패 또는 반환된 경로가 절대 경로가 아닌 경우 임의의 PATH나 상대 경로로
-/// 폴백하지 않고 즉시 오류(`Err`)를 반환합니다(Fail-Closed).
-pub fn native_backend_for_current_exe(
+/// 절대 경로만 수용하며, 상대 경로나 I/O 오류는 대체 경로(PATH, CWD 등) 없이 그대로 실패(Fail-Closed) 처리합니다.
+fn backend_from_exe_path_result(
+    exe_res: std::io::Result<PathBuf>,
 ) -> std::io::Result<network_core::runner::NativeDnsProbeBackend> {
-    let exe_path = std::env::current_exe()?;
+    let exe_path = exe_res?;
     if !exe_path.is_absolute() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -220,6 +223,15 @@ pub fn native_backend_for_current_exe(
         ));
     }
     Ok(network_core::runner::NativeDnsProbeBackend::new(exe_path))
+}
+
+/// 현재 실행 중인 프로세스의 절대 실행 파일 경로로 `NativeDnsProbeBackend`를 생성합니다.
+///
+/// `current_exe()` 실패 또는 반환된 경로가 절대 경로가 아닌 경우 임의의 PATH나 상대 경로로
+/// 폴백하지 않고 즉시 오류(`Err`)를 반환합니다(Fail-Closed).
+pub fn native_backend_for_current_exe()
+-> std::io::Result<network_core::runner::NativeDnsProbeBackend> {
+    backend_from_exe_path_result(std::env::current_exe())
 }
 
 #[cfg(test)]
@@ -235,10 +247,7 @@ mod tests {
 
     impl Write for FailWriter {
         fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "테스트용 강제 쓰기 실패",
-            ))
+            Err(std::io::Error::other("테스트용 강제 쓰기 실패"))
         }
 
         fn flush(&mut self) -> std::io::Result<()> {
@@ -264,10 +273,20 @@ mod tests {
         }
 
         fn flush(&mut self) -> std::io::Result<()> {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "테스트용 강제 플러시 실패",
-            ))
+            Err(std::io::Error::other("테스트용 강제 플러시 실패"))
+        }
+    }
+
+    /// 쓰기와 플러시 모두 실패하는 모의 Write 구현체.
+    struct FailAllWriter;
+
+    impl Write for FailAllWriter {
+        fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("테스트용 쓰기 실패"))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Err(std::io::Error::other("테스트용 플러시 실패"))
         }
     }
 
@@ -286,8 +305,7 @@ mod tests {
     impl Write for PartialFailWriter {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
             if self.written >= self.limit {
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
+                Err(std::io::Error::other(
                     "테스트용 부분 쓰기 후 한도 초과 실패",
                 ))
             } else {
@@ -295,6 +313,49 @@ mod tests {
                 self.written += take;
                 Ok(take)
             }
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// 부분 쓰기(청크 단위)를 시뮬레이션하는 모의 Write 구현체 (write_all의 반복 쓰기 검증용).
+    struct ChunkWriter {
+        chunk_size: usize,
+        buf: Vec<u8>,
+    }
+
+    impl ChunkWriter {
+        fn new(chunk_size: usize) -> Self {
+            Self {
+                chunk_size,
+                buf: Vec::new(),
+            }
+        }
+    }
+
+    impl Write for ChunkWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            if buf.is_empty() {
+                return Ok(0);
+            }
+            let take = buf.len().min(self.chunk_size);
+            self.buf.extend_from_slice(&buf[..take]);
+            Ok(take)
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// write 호출 시 항상 Ok(0)을 반환하여 WriteZero 실패를 유발하는 모의 Write 구현체.
+    struct WriteZeroWriter;
+
+    impl Write for WriteZeroWriter {
+        fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+            Ok(0)
         }
 
         fn flush(&mut self) -> std::io::Result<()> {
@@ -318,10 +379,7 @@ mod tests {
         }
 
         // 4. 인자 개수 불일치 (2개, 4개) -> InvalidArguments
-        let two_args = vec![
-            OsString::from(WORKER_FLAG),
-            OsString::from("example.com"),
-        ];
+        let two_args = vec![OsString::from(WORKER_FLAG), OsString::from("example.com")];
         assert_eq!(parse_args(&two_args), Err(EntryError::InvalidArguments));
 
         let four_args = vec![
@@ -333,7 +391,11 @@ mod tests {
         assert_eq!(parse_args(&four_args), Err(EntryError::InvalidArguments));
 
         // 5. 잘못된 플래그 또는 플래그 결합 -> InvalidArguments
-        for bad_flag in ["--worker", "--npi-dns-worker-v2", "--npi-dns-worker-v1=example.com"] {
+        for bad_flag in [
+            "--worker",
+            "--npi-dns-worker-v2",
+            "--npi-dns-worker-v1=example.com",
+        ] {
             let args = vec![
                 OsString::from(bad_flag),
                 OsString::from("example.com"),
@@ -373,15 +435,7 @@ mod tests {
 
         // 8. 잘못된 포트 형식들 -> InvalidArguments
         let bad_ports = [
-            "",
-            "0",
-            "65536",
-            "080",
-            "+80",
-            " 80 ",
-            "http",
-            "-1",
-            "999999",
+            "", "0", "65536", "080", "+80", " 80 ", "http", "-1", "999999",
         ];
         for bad_port in bad_ports {
             let args = vec![
@@ -457,6 +511,61 @@ mod tests {
         assert_eq!(parse_args(&args), Err(EntryError::InvalidArguments));
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn test_unpaired_surrogate_entry_rejection() {
+        use std::os::windows::ffi::OsStringExt;
+
+        let unpaired = OsString::from_wide(&[0xD800]);
+        let flag = OsString::from(WORKER_FLAG);
+        let host = OsString::from("127.0.0.1");
+        let port = OsString::from("80");
+
+        let call_count = AtomicUsize::new(0);
+        let mock_worker = |_h: &str, _p: &str| {
+            call_count.fetch_add(1, Ordering::SeqCst);
+            DnsWorkerPayload {
+                format: WORKER_FORMAT.to_string(),
+                host: "127.0.0.1".to_string(),
+                port: 80,
+                addresses: vec!["127.0.0.1:80".to_string()],
+                truncated: false,
+                error_code: None,
+                error_message: None,
+            }
+        };
+
+        // 1. flag가 unpaired surrogate인 경우 -> entry_with_worker에서 exit 2, stderr 정적 메시지, worker 호출 0
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let args_flag = vec![unpaired.clone(), host.clone(), port.clone()];
+        let code = entry_with_worker(&args_flag, &mut stdout, &mut stderr, mock_worker);
+        assert_eq!(code, 2);
+        assert!(stdout.is_empty());
+        assert_eq!(String::from_utf8_lossy(&stderr), INVALID_STDERR);
+        assert_eq!(call_count.load(Ordering::SeqCst), 0);
+
+        // 2. host가 unpaired surrogate인 경우 -> exit 2, stderr 정적 메시지, worker 호출 0
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let args_host = vec![flag.clone(), unpaired.clone(), port.clone()];
+        let code = entry_with_worker(&args_host, &mut stdout, &mut stderr, mock_worker);
+        assert_eq!(code, 2);
+        assert!(stdout.is_empty());
+        assert_eq!(String::from_utf8_lossy(&stderr), INVALID_STDERR);
+        assert_eq!(call_count.load(Ordering::SeqCst), 0);
+
+        // 3. port가 unpaired surrogate인 경우 -> exit 2, stderr 정적 메시지, worker 호출 0
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let args_port = vec![flag, host, unpaired];
+        let code = entry_with_worker(&args_port, &mut stdout, &mut stderr, mock_worker);
+        assert_eq!(code, 2);
+        assert!(stdout.is_empty());
+        assert_eq!(String::from_utf8_lossy(&stderr), INVALID_STDERR);
+        assert_eq!(call_count.load(Ordering::SeqCst), 0);
+    }
+
     #[test]
     fn test_static_error_no_reflection() {
         let sensitive_token = "SUPER_SECRET_TOKEN_98765";
@@ -472,7 +581,10 @@ mod tests {
         let code = entry(&args, &mut stdout_buf, &mut stderr_buf);
 
         assert_eq!(code, 2);
-        assert!(stdout_buf.is_empty(), "오류 발생 시 stdout은 비어있어야 합니다.");
+        assert!(
+            stdout_buf.is_empty(),
+            "오류 발생 시 stdout은 비어있어야 합니다."
+        );
 
         let stderr_str = String::from_utf8(stderr_buf).expect("stderr는 UTF-8이어야 합니다.");
         assert_eq!(stderr_str, INVALID_STDERR);
@@ -541,7 +653,17 @@ mod tests {
         assert!(stdout.is_empty());
         assert_eq!(call_count.load(Ordering::SeqCst), 0);
 
-        // 5. 유효한 worker 인자 진입 -> worker 정확히 1회 호출
+        // 5. 도메인 인자 단독 입력(플래그 누락) -> worker 호출 0
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let domain_only_args = vec![OsString::from("example.com"), OsString::from("80")];
+        let code = entry_with_worker(&domain_only_args, &mut stdout, &mut stderr, mock_worker);
+        assert_eq!(code, 2);
+        assert_eq!(String::from_utf8_lossy(&stderr), INVALID_STDERR);
+        assert!(stdout.is_empty());
+        assert_eq!(call_count.load(Ordering::SeqCst), 0);
+
+        // 6. 유효한 worker 인자 진입 -> worker 정확히 1회 호출
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
         let valid_args = vec![
@@ -563,19 +685,32 @@ mod tests {
         let mut fail_stderr = FailWriter;
         assert_eq!(entry(&[], &mut stdout, &mut fail_stderr), 1);
 
-        // 2. help에서 stderr 플러시 실패 -> exit 1
+        // 2. noargs에서 stderr 플러시 실패 -> exit 1
         let mut stdout = Vec::new();
         let mut fail_flush_stderr = FailFlushWriter::new();
+        assert_eq!(entry(&[], &mut stdout, &mut fail_flush_stderr), 1);
+
+        // 3. help에서 stderr 쓰기 실패 -> exit 1
+        let mut stdout = Vec::new();
+        let mut fail_stderr = FailWriter;
         let help_args = vec![OsString::from("--help")];
+        assert_eq!(entry(&help_args, &mut stdout, &mut fail_stderr), 1);
+
+        // 4. help에서 stderr 플러시 실패 -> exit 1
+        let mut fail_flush_stderr = FailFlushWriter::new();
         assert_eq!(entry(&help_args, &mut stdout, &mut fail_flush_stderr), 1);
 
-        // 3. invalid에서 stderr 쓰기 실패 -> exit 1 (정상 invalid는 2이나 I/O 실패 시 1)
+        // 5. invalid에서 stderr 쓰기 실패 -> exit 1 (정상 invalid는 2이나 I/O 실패 시 1)
         let mut stdout = Vec::new();
         let mut fail_stderr = FailWriter;
         let invalid_args = vec![OsString::from("--bad")];
         assert_eq!(entry(&invalid_args, &mut stdout, &mut fail_stderr), 1);
 
-        // 4. worker에서 stdout 쓰기 실패 -> exit 1 및 stderr에 failure_message 출력
+        // 6. invalid에서 stderr 플러시 실패 -> exit 1
+        let mut fail_flush_stderr = FailFlushWriter::new();
+        assert_eq!(entry(&invalid_args, &mut stdout, &mut fail_flush_stderr), 1);
+
+        // 7. worker에서 stdout 쓰기 실패 -> exit 1 및 stderr에 failure_message 출력
         let valid_args = vec![
             OsString::from(WORKER_FLAG),
             OsString::from("127.0.0.1"),
@@ -596,17 +731,81 @@ mod tests {
         assert_eq!(code, 1);
         assert_eq!(String::from_utf8_lossy(&stderr), OUTPUT_FAILURE_STDERR);
 
-        // 5. worker에서 stdout 부분 쓰기 후 실패 -> exit 1
+        // 8. worker에서 stdout 부분 쓰기 후 실패 -> exit 1
         let mut partial_stdout = PartialFailWriter::new(10);
         let mut stderr = Vec::new();
         let code = entry_with_worker(&valid_args, &mut partial_stdout, &mut stderr, mock_worker);
         assert_eq!(code, 1);
         assert_eq!(String::from_utf8_lossy(&stderr), OUTPUT_FAILURE_STDERR);
 
-        // 6. worker에서 stdout 플러시 실패 -> exit 1
+        // 9. worker에서 stdout 플러시 실패 -> exit 1
         let mut fail_flush_stdout = FailFlushWriter::new();
         let mut stderr = Vec::new();
-        let code = entry_with_worker(&valid_args, &mut fail_flush_stdout, &mut stderr, mock_worker);
+        let code = entry_with_worker(
+            &valid_args,
+            &mut fail_flush_stdout,
+            &mut stderr,
+            mock_worker,
+        );
+        assert_eq!(code, 1);
+        assert_eq!(String::from_utf8_lossy(&stderr), OUTPUT_FAILURE_STDERR);
+
+        // 10. worker에서 stdout 실패 후 stderr마저 쓰기/플러시 실패해도 exit 1 반환 (패닉 없음)
+        let mut fail_stdout2 = FailWriter;
+        let mut fail_stderr2 = FailAllWriter;
+        let code = entry_with_worker(
+            &valid_args,
+            &mut fail_stdout2,
+            &mut fail_stderr2,
+            mock_worker,
+        );
+        assert_eq!(code, 1);
+
+        // 11. 민감 입력 포함 invalid 인자에서 stderr 쓰기 실패 시에도 exit 1 반환 (반사 없음)
+        let sensitive_token = "SECRET_TOKEN_XYZ";
+        let bad_args = vec![
+            OsString::from(WORKER_FLAG),
+            OsString::from(format!("user:{sensitive_token}@example.com")),
+            OsString::from("80"),
+        ];
+        let mut stdout = Vec::new();
+        let mut fail_stderr = FailWriter;
+        let code = entry(&bad_args, &mut stdout, &mut fail_stderr);
+        assert_eq!(code, 1);
+        assert!(stdout.is_empty());
+    }
+
+    #[test]
+    fn test_chunk_writer_and_write_zero() {
+        let valid_args = vec![
+            OsString::from(WORKER_FLAG),
+            OsString::from("127.0.0.1"),
+            OsString::from("80"),
+        ];
+        let mock_worker = |host: &str, _port: &str| DnsWorkerPayload {
+            format: WORKER_FORMAT.to_string(),
+            host: host.to_string(),
+            port: 80,
+            addresses: vec!["127.0.0.1:80".to_string()],
+            truncated: false,
+            error_code: None,
+            error_message: None,
+        };
+        let expected_line =
+            network_core::dns_engine::worker_output_line(&mock_worker("127.0.0.1", "80"));
+
+        // 1. ChunkWriter(작은 버퍼로 부분 write 반복) -> write_all에 의해 정상 exit 0 및 전체 기록 완료
+        let mut chunk_stdout = ChunkWriter::new(7);
+        let mut stderr = Vec::new();
+        let code = entry_with_worker(&valid_args, &mut chunk_stdout, &mut stderr, mock_worker);
+        assert_eq!(code, 0);
+        assert!(stderr.is_empty());
+        assert_eq!(chunk_stdout.buf, expected_line.as_bytes());
+
+        // 2. WriteZeroWriter(Ok(0) 반환하여 WriteZero 유발) -> exit 1 및 정적 실패 메시지
+        let mut zero_stdout = WriteZeroWriter;
+        let mut stderr = Vec::new();
+        let code = entry_with_worker(&valid_args, &mut zero_stdout, &mut stderr, mock_worker);
         assert_eq!(code, 1);
         assert_eq!(String::from_utf8_lossy(&stderr), OUTPUT_FAILURE_STDERR);
     }
@@ -632,12 +831,7 @@ mod tests {
             error_message: None,
         };
         let p_clone = expected_payload.clone();
-        let code = entry_with_worker(
-            &valid_args,
-            &mut stdout,
-            &mut stderr,
-            move |_h, _p| p_clone,
-        );
+        let code = entry_with_worker(&valid_args, &mut stdout, &mut stderr, move |_h, _p| p_clone);
         assert_eq!(code, 0);
         assert!(stderr.is_empty());
         let decoded = decode_worker_payload(&stdout, "synthetic.test", 8080)
@@ -657,12 +851,9 @@ mod tests {
             error_message: Some("연결 시간 초과".to_string()),
         };
         let p_err_clone = expected_error_payload.clone();
-        let code = entry_with_worker(
-            &valid_args,
-            &mut stdout,
-            &mut stderr,
-            move |_h, _p| p_err_clone,
-        );
+        let code = entry_with_worker(&valid_args, &mut stdout, &mut stderr, move |_h, _p| {
+            p_err_clone
+        });
         assert_eq!(code, 0);
         assert!(stderr.is_empty());
         let decoded_err = decode_worker_payload(&stdout, "synthetic.test", 8080)
@@ -713,93 +904,231 @@ mod tests {
         assert_eq!(decoded_v6.error_message, None);
     }
 
-    #[test]
-    fn test_payload_overflow_and_multiline_rejection() {
-        let valid_args = vec![
-            OsString::from(WORKER_FLAG),
-            OsString::from("overflow.test"),
-            OsString::from("80"),
-        ];
-
-        // 1. 16KiB(MAX_PAYLOAD_BYTES) 초과 페이로드 주입
-        let long_addresses: Vec<String> = (0..600)
-            .map(|i| format!("192.0.2.{}:80", i % 250))
-            .collect();
-        let overflow_payload = DnsWorkerPayload {
+    /// 출력 바이트 상한 경계 검사용 합성 페이로드를 생성합니다.
+    ///
+    /// 주의: 본 헬퍼는 worker 출력 바이트 가드(MAX_PAYLOAD_BYTES = 16,384) 동작을 검증하기 위해
+    /// 정상 엔진의 512바이트 오류 메시지 상한을 의도적으로 초과하는 긴 메시지를 주입한 합성 데이터이며,
+    /// 정상 OS 페이로드 또는 decoder가 이를 수용한다는 증거가 아닙니다.
+    fn make_boundary_payload(prefix: &str, target_wire_bytes: usize) -> DnsWorkerPayload {
+        let mut payload = DnsWorkerPayload {
             format: WORKER_FORMAT.to_string(),
-            host: "overflow.test".to_string(),
-            port: 80,
-            addresses: long_addresses,
-            truncated: false,
-            error_code: None,
-            error_message: None,
-        };
-        let line = network_core::dns_engine::worker_output_line(&overflow_payload);
-        assert!(
-            line.as_bytes().len() > MAX_PAYLOAD_BYTES,
-            "테스트 fixture의 직렬화 바이트가 MAX_PAYLOAD_BYTES를 초과해야 합니다."
-        );
-
-        let mut stdout = Vec::new();
-        let mut stderr = Vec::new();
-        let code = entry_with_worker(
-            &valid_args,
-            &mut stdout,
-            &mut stderr,
-            move |_h, _p| overflow_payload,
-        );
-        assert_eq!(code, 1);
-        assert!(stdout.is_empty(), "상한 초과 페이로드는 stdout에 쓰지 않아야 합니다.");
-        assert_eq!(String::from_utf8_lossy(&stderr), OUTPUT_FAILURE_STDERR);
-
-        // 2. 다중 행('\n' 또는 '\r' 포함) 페이로드 주입
-        let multiline_payload = DnsWorkerPayload {
-            format: WORKER_FORMAT.to_string(),
-            host: "overflow.test".to_string(),
+            host: "boundary.test".to_string(),
             port: 80,
             addresses: Vec::new(),
             truncated: false,
             error_code: Some(1),
-            error_message: Some("첫 번째 줄\n두 번째 줄".to_string()),
+            error_message: Some(prefix.to_string()),
         };
-        let mut stdout = Vec::new();
-        let mut stderr = Vec::new();
-        let code = entry_with_worker(
-            &valid_args,
-            &mut stdout,
-            &mut stderr,
-            move |_h, _p| multiline_payload,
+        let base_len = network_core::dns_engine::worker_output_line(&payload).len();
+        assert!(
+            base_len <= target_wire_bytes,
+            "접두사 기본 직렬화 크기({base_len})가 목표 바이트({target_wire_bytes})보다 큽니다."
         );
-        assert_eq!(code, 1);
-        assert!(stdout.is_empty(), "다중 행 페이로드는 stdout에 쓰지 않아야 합니다.");
-        assert_eq!(String::from_utf8_lossy(&stderr), OUTPUT_FAILURE_STDERR);
+        let pad_needed = target_wire_bytes - base_len;
+        let mut msg = prefix.to_string();
+        msg.extend(std::iter::repeat_n('A', pad_needed));
+        payload.error_message = Some(msg);
+
+        let final_len = network_core::dns_engine::worker_output_line(&payload).len();
+        assert_eq!(
+            final_len, target_wire_bytes,
+            "생성된 페이로드의 직렬화 바이트가 정확히 목표 바이트와 일치해야 합니다."
+        );
+        payload
     }
 
     #[test]
-    fn test_native_backend_current_exe() {
-        let backend_res = native_backend_for_current_exe();
+    fn test_payload_boundary_and_escaped_multiline() {
+        let valid_args = vec![
+            OsString::from(WORKER_FLAG),
+            OsString::from("boundary.test"),
+            OsString::from("80"),
+        ];
+
+        // 1. ASCII 접두사 경계 3개 (MAX_PAYLOAD_BYTES - 1, 정확 MAX, MAX + 1)
+        let ascii_prefix = "ASCII_PREFIX_";
+        for target_bytes in [
+            MAX_PAYLOAD_BYTES - 1,
+            MAX_PAYLOAD_BYTES,
+            MAX_PAYLOAD_BYTES + 1,
+        ] {
+            let payload = make_boundary_payload(ascii_prefix, target_bytes);
+            let expected_line = network_core::dns_engine::worker_output_line(&payload);
+            assert_eq!(
+                expected_line.len(),
+                target_bytes,
+                "실제 worker_output_line 바이트 수가 목표 바이트와 정확히 일치해야 합니다."
+            );
+
+            let mut stdout = Vec::new();
+            let mut stderr = Vec::new();
+            let p_clone = payload.clone();
+            let code =
+                entry_with_worker(&valid_args, &mut stdout, &mut stderr, move |_h, _p| p_clone);
+
+            if target_bytes <= MAX_PAYLOAD_BYTES {
+                assert_eq!(code, 0, "상한 이하({target_bytes})는 exit 0이어야 합니다.");
+                assert_eq!(
+                    stdout,
+                    expected_line.as_bytes(),
+                    "상한 이하 출력은 expected wire와 정확히 일치해야 합니다."
+                );
+                assert!(
+                    stderr.is_empty(),
+                    "상한 이하 성공 시 stderr는 비어있어야 합니다."
+                );
+            } else {
+                assert_eq!(code, 1, "상한 초과({target_bytes})는 exit 1이어야 합니다.");
+                assert!(
+                    stdout.is_empty(),
+                    "상한 초과 시 stdout은 비어있어야 합니다."
+                );
+                assert_eq!(
+                    String::from_utf8_lossy(&stderr),
+                    OUTPUT_FAILURE_STDERR,
+                    "상한 초과 시 정적 실패 메시지가 출력되어야 합니다."
+                );
+            }
+        }
+
+        // 2. 한국어 멀티바이트 + quote / backslash / CRLF 섞은 접두사 경계 3개 (MAX - 1, MAX, MAX + 1)
+        let mixed_prefix = "한국어접두사_\"따옴표\"_\\역슬래시_\r\n_오류메시지_";
+        for target_bytes in [
+            MAX_PAYLOAD_BYTES - 1,
+            MAX_PAYLOAD_BYTES,
+            MAX_PAYLOAD_BYTES + 1,
+        ] {
+            let payload = make_boundary_payload(mixed_prefix, target_bytes);
+            let expected_line = network_core::dns_engine::worker_output_line(&payload);
+            assert_eq!(
+                expected_line.len(),
+                target_bytes,
+                "실제 worker_output_line 바이트 수가 목표 바이트와 정확히 일치해야 합니다."
+            );
+
+            let mut stdout = Vec::new();
+            let mut stderr = Vec::new();
+            let p_clone = payload.clone();
+            let code =
+                entry_with_worker(&valid_args, &mut stdout, &mut stderr, move |_h, _p| p_clone);
+
+            if target_bytes <= MAX_PAYLOAD_BYTES {
+                assert_eq!(code, 0, "상한 이하({target_bytes})는 exit 0이어야 합니다.");
+                assert_eq!(
+                    stdout,
+                    expected_line.as_bytes(),
+                    "상한 이하 출력은 expected wire와 정확히 일치해야 합니다."
+                );
+                assert!(
+                    stderr.is_empty(),
+                    "상한 이하 성공 시 stderr는 비어있어야 합니다."
+                );
+            } else {
+                assert_eq!(code, 1, "상한 초과({target_bytes})는 exit 1이어야 합니다.");
+                assert!(
+                    stdout.is_empty(),
+                    "상한 초과 시 stdout은 비어있어야 합니다."
+                );
+                assert_eq!(
+                    String::from_utf8_lossy(&stderr),
+                    OUTPUT_FAILURE_STDERR,
+                    "상한 초과 시 정적 실패 메시지가 출력되어야 합니다."
+                );
+            }
+        }
+
+        // 3. JSON 문자열 안의 개행/CRLF/따옴표/역슬래시가 escape되어 wire 1줄로 유지되는 유효 fixture 검증
+        // (기존의 multiline fixture가 exit 1을 기대했던 계약 오류를 보정하여 exit 0, stderr empty, 디코드 동등성 검증)
+        let escaped_payload = DnsWorkerPayload {
+            format: WORKER_FORMAT.to_string(),
+            host: "boundary.test".to_string(),
+            port: 80,
+            addresses: Vec::new(),
+            truncated: false,
+            error_code: Some(1),
+            error_message: Some("첫 번째 줄\n두 번째 줄\r\n\"따옴표\"\\역슬래시".to_string()),
+        };
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let p_clone = escaped_payload.clone();
+        let code = entry_with_worker(&valid_args, &mut stdout, &mut stderr, move |_h, _p| p_clone);
+        assert_eq!(
+            code, 0,
+            "escape된 JSON 개행은 정상 1줄 wire이므로 exit 0이어야 합니다."
+        );
+        assert!(
+            stderr.is_empty(),
+            "정상 escape wire 출력 시 stderr는 비어있어야 합니다."
+        );
+        assert!(
+            stdout.ends_with(b"\n"),
+            "출력 wire는 최종 LF 1개로 끝나야 합니다."
+        );
+        assert_eq!(
+            stdout.iter().filter(|&&b| b == b'\n').count(),
+            1,
+            "stdout 전체에 실제 LF는 최종 1개만 존재해야 합니다."
+        );
+        assert!(
+            !stdout.contains(&b'\r'),
+            "stdout에 실제 CR 바이트는 존재하지 않아야 합니다."
+        );
+        let decoded = decode_worker_payload(&stdout, "boundary.test", 80)
+            .expect("escape된 개행이 포함된 stdout 디코드 실패");
+        assert_eq!(
+            decoded, escaped_payload,
+            "디코드된 페이로드가 원본과 완전히 일치해야 합니다."
+        );
+    }
+
+    #[test]
+    fn test_native_backend_pure_helper() {
+        // 1. 정상 합성 Windows 절대 경로 주입 -> 백엔드 생성 성공 및 helper_executable 동등성 검증
+        let synthetic_abs =
+            PathBuf::from(r"C:\Program Files\NetworkPathInspector\NetworkQuickCheck.exe");
+        let backend_res = backend_from_exe_path_result(Ok(synthetic_abs.clone()));
         assert!(
             backend_res.is_ok(),
-            "native_backend_for_current_exe 호출이 성공해야 합니다: {:?}",
-            backend_res.err()
+            "합성 절대 경로 주입 시 성공해야 합니다."
         );
-        let backend = backend_res.expect("backend 객체 추출 성공");
-        assert!(
-            backend.helper_executable.is_absolute(),
-            "백엔드의 helper 실행 파일 경로는 절대 경로여야 합니다: {:?}",
-            backend.helper_executable
+        let backend = backend_res.expect("backend 추출");
+        assert_eq!(backend.helper_executable, synthetic_abs);
+        assert!(backend.helper_executable.is_absolute());
+
+        // 2. 상대 경로 주입 -> InvalidInput 오류 반환 및 Fail-Closed 검증
+        let synthetic_rel = PathBuf::from("relative/path/NetworkQuickCheck.exe");
+        let rel_res = backend_from_exe_path_result(Ok(synthetic_rel));
+        assert!(rel_res.is_err(), "상대 경로는 거부되어야 합니다.");
+        assert_eq!(
+            rel_res.err().unwrap().kind(),
+            std::io::ErrorKind::InvalidInput
         );
-        // 주의: 본 테스트에서 반환된 helper_executable 경로는 test harness runner의 실행 파일이며,
-        // 최종 제품 실행 파일(NetworkQuickCheck.exe)의 증거가 아닙니다.
+
+        // 3. io::Error 주입 -> 오류 보존 검증
+        let io_err = std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "실행 파일을 찾을 수 없습니다.",
+        );
+        let err_res = backend_from_exe_path_result(Err(io_err));
+        assert!(err_res.is_err(), "I/O 오류는 그대로 전파되어야 합니다.");
+        assert_eq!(err_res.err().unwrap().kind(), std::io::ErrorKind::NotFound);
     }
 
     // 부모 대조: JSON 문자열의 CR/LF/따옴표/역슬래시는 escape되어 wire 한 줄과 양립한다.
     #[test]
     fn parent_escaped_json_error_payload_is_preserved_as_one_line() {
-        let args = [OsString::from(WORKER_FLAG), OsString::from("escape.invalid"), OsString::from("80")];
+        let args = [
+            OsString::from(WORKER_FLAG),
+            OsString::from("escape.invalid"),
+            OsString::from("80"),
+        ];
         let payload = DnsWorkerPayload {
-            format: WORKER_FORMAT.to_string(), host: "escape.invalid".to_string(), port: 80,
-            addresses: vec![], truncated: false, error_code: None,
+            format: WORKER_FORMAT.to_string(),
+            host: "escape.invalid".to_string(),
+            port: 80,
+            addresses: vec![],
+            truncated: false,
+            error_code: None,
             error_message: Some("한국어\r\n\"따옴표\"\\역슬래시".to_string()),
         };
         let mut stdout = Vec::new();
@@ -810,6 +1139,9 @@ mod tests {
         assert!(stdout.ends_with(b"\n"));
         assert_eq!(stdout.iter().filter(|&&b| b == b'\n').count(), 1);
         assert!(!stdout.contains(&b'\r'));
-        assert_eq!(decode_worker_payload(&stdout, "escape.invalid", 80).unwrap(), payload);
+        assert_eq!(
+            decode_worker_payload(&stdout, "escape.invalid", 80).unwrap(),
+            payload
+        );
     }
 }

@@ -25,12 +25,14 @@ fn test_product_exe_dns_worker_dispatch_localhost() {
         exe_path
     );
     assert!(
-        exe_path.exists(),
-        "제품 실행 파일이 디스크에 존재해야 합니다: {:?}",
+        exe_path.is_file(),
+        "제품 실행 파일이 디스크에 파일로 존재해야 합니다: {:?}",
         exe_path
     );
 
-    // 부모 소유 localhost 리스너를 바인딩합니다 (127.0.0.1:0 및 동일 포트 [::1]).
+    // 부모 소유 localhost 리스너를 바인딩합니다 (127.0.0.1 및 동일 포트 [::1]).
+    // 두 TcpListener가 동일 port에 모두 성공한 경우만 non-Optional 쌍으로 보관합니다.
+    // IPv6 실패 시 v4 해제 후 다음 시도하며, 총 10회 소진 시 expect 실패합니다.
     // 시험 종료 시점까지 리스너 핸들을 유지하여 포트가 유효하게 점유되도록 보장합니다.
     let mut bound = None;
     for _ in 0..10 {
@@ -40,14 +42,23 @@ fn test_product_exe_dns_worker_dispatch_localhost() {
         };
         let port = match v4.local_addr() {
             Ok(addr) => addr.port(),
-            Err(_) => continue,
+            Err(_) => {
+                drop(v4);
+                continue;
+            }
         };
-        let v6 = TcpListener::bind(format!("[::1]:{port}")).ok();
+        let v6 = match TcpListener::bind(format!("[::1]:{port}")) {
+            Ok(listener) => listener,
+            Err(_) => {
+                drop(v4);
+                continue;
+            }
+        };
         bound = Some((v4, v6, port));
         break;
     }
     let (_v4_listener, _v6_listener, port) =
-        bound.expect("localhost 테스트를 위한 TcpListener 바인딩 실패");
+        bound.expect("localhost 테스트를 위한 TcpListener(IPv4 및 IPv6 동일 포트) 바인딩 실패");
 
     // 포트 및 호스트 사전 검증 (엔진 계약 확인)
     assert!(validate_host("localhost").is_ok());
@@ -115,8 +126,8 @@ fn test_product_exe_dns_worker_dispatch_localhost() {
             "반환 주소 포트가 요청 포트와 일치하지 않습니다: {sock_addr}"
         );
         let ip = sock_addr.ip();
-        let is_loopback = ip == IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))
-            || ip == IpAddr::V6(Ipv6Addr::LOCALHOST);
+        let is_loopback =
+            ip == IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)) || ip == IpAddr::V6(Ipv6Addr::LOCALHOST);
         assert!(
             is_loopback,
             "반환 IP가 허용된 루프백 주소(127.0.0.1 또는 ::1)가 아닙니다: {ip}"
