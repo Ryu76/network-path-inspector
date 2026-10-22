@@ -1,9 +1,9 @@
 //! Network Quick Check(Part B) 순수 Rust 비동기 진단 실행기 모듈.
 //!
 //! ## 설계 및 안전 원칙
-//! - **실제 측정 엔진 재사용**: 본 모듈은 TCP/ICMP/호스트 스냅샷 등 네트워크 측정 로직을
-//!   직접 구현하거나 복제하지 않으며, 검증된 `NativeProbeBackend`를 통해 기존 `network_core`의
-//!   `connect_once`, `ping_once`, `collect_host_snapshot` 및 어댑터를 재사용합니다.
+//! - **실제 측정 엔진 재사용**: 본 모듈은 TCP/ICMP/호스트 스냅샷/DNS 해석 등 네트워크 측정 로직을
+//!   직접 구현하거나 복제하지 않으며, 검증된 `QuickProbeBackend`를 통해 기존 `network_core`의
+//!   `connect_once`, `ping_once`, `collect_host_snapshot` 및 `dns_engine::resolve_isolated`와 어댑터를 재사용합니다.
 //! - **비파괴·읽기 전용**: 시스템 정책, 방화벽, 레지스트리, 라우팅 테이블 변경을 절대 수행하지 않습니다.
 //! - **측정 사실·추론·미확인의 엄격한 분리**: 패킷 캡처(PCAP) 근거 없는 SYN/RST 관찰 주장이나
 //!   응답 없는 HOP을 차단 장비로 단정하지 않으며, 미확인 nullable 필드는 명시적 `None`(`null`)으로 유지합니다.
@@ -12,10 +12,14 @@
 //! - **메모리 예산 엄격 준수**: 보관 결과의 JSON 직렬화 바이트(`serialized_result_bytes`)를
 //!   기준으로 예산을 관리하며, 예산 초과 시 즉각 추가 저장을 중단하고 명시적인 한도 도달(`limit_reached = true`)과
 //!   누락 건수(`omitted_results`)를 집계합니다.
+//! - **DNS 주소 선택 및 단일 진실 공급원 준수**: OS 해석기가 반환한 첫 번째 SocketAddr만 후보로 사용하며,
+//!   임의 재정렬, trim, 형태 수리, 다음 IP 자동 대체 연결(fallback)을 일체 수행하지 않습니다.
+//!   첫 번째 후보 주소가 미지정, 멀티캐스트, 브로드캐스트, 링크로컬 등 안전하지 않은 주소인 경우
+//!   연결을 즉각 차단하고 후속 프로브를 실행하지 않습니다.
 //!
 //! ## 알려진 한계 및 취소 계약
-//! - **도메인 주소 해석 미지원**: 이번 마일스톤(QG2)에서는 도메인 주소 해석(DNS Resolver)이
-//!   구현되어 있지 않으므로, 주소 해석이 필요한 대상은 모든 프로브 시작 전에 명확한 `Err`로 실행을 차단합니다.
+//! - **ICMP Traceroute 미지원**: 이번 마일스톤(QG2)에서는 ICMP Traceroute 프로브가
+//!   구현되어 있지 않으므로 백엔드 호출 없이 명시적 `UNAVAILABLE`로 처리합니다.
 //! - **ICMP 동기 호출 한계**: Windows IP Helper ICMP API(`ping_once`)는 블로킹 시스템 호출이므로,
 //!   `tokio::task::spawn_blocking`을 통해 비동기 런타임 차단을 방지하되 호출 중인 작업은 OS 타임아웃(최대 2000ms)
 //!   경과 후 취소가 감지됩니다 (즉각적인 하드 킬을 보장하지 않습니다).
@@ -24,6 +28,7 @@
 
 use std::future::Future;
 use std::net::{IpAddr, SocketAddr};
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -31,13 +36,15 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
+use crate::dns::dns_to_quick_result;
+use crate::dns_engine::DnsMeasurement;
 use crate::measurements::{host_to_quick_result, icmp_to_quick_result};
 use crate::quick::{
     EvidenceLevel, QUICK_PRODUCT_NAME, QUICK_SCHEMA_VERSION, QuickContext, QuickFeature,
     QuickResult, QuickStatus, tcp_to_quick_result, validate_quick_result,
     validate_rfc3339_timestamp,
 };
-use crate::targets::{QuickOptions, QuickPlan, QuickTarget, build_quick_plan};
+use crate::targets::{QuickOptions, QuickPlan, QuickTarget, build_quick_plan, parse_target_pair};
 
 /// 최소 허용 결과 직렬화 바이트 한도 (4KB = 4,096 바이트).
 pub const MIN_RESULT_BYTES: usize = 4096;
@@ -58,7 +65,6 @@ pub const MAX_CONCURRENT_TARGETS: usize = 4;
 pub const MAX_ROWS: usize = 500;
 
 /// Network Quick Check 진단 실행 요청 DTO.
-// 요청은 내부 Rust 타입이며 아직 JSON wire DTO 계약이 아니다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QuickRunRequest {
     /// 고유 세션 식별자 (비어있을 수 없음).
@@ -84,7 +90,7 @@ pub struct ProbeCounts {
     pub icmp_ping: usize,
     /// 실제 로컬 호스트 네트워크 스냅샷 수집 호출 횟수.
     pub local_network: usize,
-    /// 실제 DNS 질의 시도 호출 횟수 (현재 slice 미지원: 항상 0).
+    /// 실제 DNS 리졸버 백엔드 resolve 호출 횟수 (네트워크 질의 수가 아님).
     pub dns_lookup: usize,
     /// 실제 ICMP Traceroute 시도 호출 횟수 (현재 slice 미지원: 항상 0).
     pub icmp_traceroute: usize,
@@ -119,6 +125,10 @@ pub struct QuickRunReport {
 pub type ProbeFuture<'a> =
     Pin<Box<dyn Future<Output = Result<QuickResult, Vec<String>>> + Send + 'a>>;
 
+/// 프로브 비동기 DNS 해석 반환 퓨처 타입.
+pub type DnsProbeFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<DnsMeasurement, Vec<String>>> + Send + 'a>>;
+
 /// Network Quick Check 프로브 백엔드 추상화 트레이트.
 pub trait QuickProbeBackend: Send + Sync {
     /// 단일 대상에 대해 비동기 TCP 연결 프로브를 수행합니다.
@@ -146,6 +156,23 @@ pub trait QuickProbeBackend: Send + Sync {
         target: IpAddr,
         cancel: Arc<AtomicBool>,
     ) -> ProbeFuture<'a>;
+
+    /// 단일 도메인 또는 IP 대상에 대해 DNS 해석을 수행합니다.
+    ///
+    /// 기본 구현은 미구성 오류(`Err`)를 반환하여 기존 구현체와의 하위 호환성을 유지합니다.
+    fn resolve<'a>(
+        &'a self,
+        ctx: QuickContext,
+        timeout: Duration,
+        cancel: Arc<AtomicBool>,
+    ) -> DnsProbeFuture<'a> {
+        let _ = (ctx, timeout, cancel);
+        Box::pin(async move {
+            Err(vec![
+                "기본 프로브 백엔드에 DNS 해석기(resolve)가 구현되지 않았습니다.".to_string(),
+            ])
+        })
+    }
 }
 
 /// 실제 OS 네이티브 네트워킹 API를 호출하는 기본 프로브 백엔드 구현체.
@@ -217,6 +244,81 @@ impl QuickProbeBackend for NativeProbeBackend {
     }
 }
 
+/// 실제 OS 네이티브 네트워킹 API 및 격리된 DNS helper 프로세스를 호출하는 프로브 백엔드 구현체.
+#[derive(Debug, Clone)]
+pub struct NativeDnsProbeBackend {
+    pub helper_executable: PathBuf,
+    inner: NativeProbeBackend,
+}
+
+impl NativeDnsProbeBackend {
+    /// 명시적 helper 실행파일 경로로 새 백엔드를 생성합니다.
+    pub fn new(helper_executable: PathBuf) -> Self {
+        Self {
+            helper_executable,
+            inner: NativeProbeBackend,
+        }
+    }
+}
+
+impl QuickProbeBackend for NativeDnsProbeBackend {
+    fn tcp<'a>(
+        &'a self,
+        ctx: QuickContext,
+        target: SocketAddr,
+        timeout: Duration,
+        cancel: Arc<AtomicBool>,
+    ) -> ProbeFuture<'a> {
+        self.inner.tcp(ctx, target, timeout, cancel)
+    }
+
+    fn icmp<'a>(
+        &'a self,
+        ctx: QuickContext,
+        target: IpAddr,
+        timeout: Duration,
+        cancel: Arc<AtomicBool>,
+    ) -> ProbeFuture<'a> {
+        self.inner.icmp(ctx, target, timeout, cancel)
+    }
+
+    fn host<'a>(
+        &'a self,
+        ctx: QuickContext,
+        target: IpAddr,
+        cancel: Arc<AtomicBool>,
+    ) -> ProbeFuture<'a> {
+        self.inner.host(ctx, target, cancel)
+    }
+
+    fn resolve<'a>(
+        &'a self,
+        ctx: QuickContext,
+        timeout: Duration,
+        cancel: Arc<AtomicBool>,
+    ) -> DnsProbeFuture<'a> {
+        let helper = self.helper_executable.clone();
+        Box::pin(async move {
+            tokio::task::spawn_blocking(move || {
+                let measurement = crate::dns_engine::resolve_isolated(
+                    &helper,
+                    &ctx.target_host,
+                    ctx.target_port,
+                    timeout,
+                    cancel,
+                );
+                Ok(measurement)
+            })
+            .await
+            .map_err(|join_err| {
+                vec![format!(
+                    "DNS 해석 동기 작업 spawn_blocking 실패 (JoinError): {join_err}"
+                )]
+            })?
+        })
+    }
+}
+
 /// 내부 원자적 백엔드 호출 카운터.
 #[derive(Debug, Default)]
 struct SharedInvocationCounters {
@@ -244,6 +346,92 @@ struct SingleTargetOutput {
     target_idx: usize,
     results: Vec<(usize, QuickResult)>,
     errors: Vec<String>,
+}
+
+/// 해석된 IP 주소가 진단 대상으로서 안전한지 검증합니다.
+///
+/// 기존 `targets`의 `parse_target_pair`를 재사용하여 미지정/멀티캐스트/브로드캐스트를 검증하고,
+/// 추가로 링크로컬 주소(169.254.0.0/16, fe80::/10)를 엄격히 차단합니다.
+fn is_safe_resolved_ip(ip: IpAddr, port: u16) -> bool {
+    let ip_str = ip.to_string();
+    let port_str = port.to_string();
+    if parse_target_pair(&ip_str, &port_str).is_err() {
+        return false;
+    }
+
+    match ip {
+        IpAddr::V4(v4) => {
+            if v4.is_link_local() {
+                return false;
+            }
+        }
+        IpAddr::V6(v6) => {
+            if v6.is_unicast_link_local() {
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
+/// 도메인 대상의 프로브 결과에 DNS 필수 해석 원문 정보 및 첫 후보 선택 정책 한계를 추가합니다.
+///
+/// 기존 `details.raw_measurement`를 일체 덮어쓰지 않고 `limitations` 배열에만 고유하게 추가합니다.
+fn append_domain_resolution_limitations(
+    result: &mut QuickResult,
+    dns_m: &DnsMeasurement,
+    selected_ip: IpAddr,
+) {
+    if let Some(details_obj) = result.details.as_object_mut()
+        && let Some(limitations_val) = details_obj.get_mut("limitations")
+        && let Some(limitations) = limitations_val.as_array_mut()
+    {
+        let policy_msg = serde_json::Value::String(format!(
+            "도메인 주소 해석 결과 중 OS가 반환한 첫 번째 주소('{selected_ip}')만 후보로 사용하였으며, 다른 주소로의 자동 대체 연결은 시도하지 않음"
+        ));
+        if !limitations.contains(&policy_msg) {
+            limitations.push(policy_msg);
+        }
+        let raw_addresses_msg = serde_json::Value::String(format!(
+            "해석된 전체 주소 목록(총 {}개): [{}]",
+            dns_m.addresses.len(),
+            dns_m.addresses.join(", ")
+        ));
+        if !limitations.contains(&raw_addresses_msg) {
+            limitations.push(raw_addresses_msg);
+        }
+    }
+}
+
+/// 선행 DNS 해석 실패 또는 미지원 기능에 대한 UNAVAILABLE 결과를 생성합니다.
+fn make_unavailable_result(
+    ctx: &QuickContext,
+    feature: QuickFeature,
+    reason: String,
+) -> QuickResult {
+    let details = serde_json::json!({
+        "outcome": "UNAVAILABLE",
+        "limitations": [reason],
+        "raw_measurement": {}
+    });
+
+    QuickResult {
+        schema_version: QUICK_SCHEMA_VERSION.to_string(),
+        product: QUICK_PRODUCT_NAME.to_string(),
+        session_id: ctx.session_id.clone(),
+        timestamp_iso8601: ctx.timestamp_iso8601.clone(),
+        source_host: ctx.source_host.clone(),
+        target_host: ctx.target_host.clone(),
+        resolved_ip: None,
+        target_port: ctx.target_port,
+        feature,
+        status: QuickStatus::UNKNOWN,
+        elapsed_ms: None,
+        os_error_code: None,
+        details,
+        evidence_level: EvidenceLevel::UNKNOWN,
+    }
 }
 
 /// 요청의 기본 메타데이터 및 바이트 예산을 철저히 검증합니다.
@@ -291,17 +479,6 @@ fn pre_validate_request(request: &QuickRunRequest) -> Result<QuickPlan, Vec<Stri
             return Err(errors);
         }
     };
-
-    // 도메인 주소 해석 요구 검증: 이번 slice에서 DNS resolver 미구현이므로
-    // 선행 주소 해석이 필요한 대상(TCP/Ping/Traceroute/LocalNetwork 선택)이 있으면 전면 차단
-    for planned in &plan.targets {
-        if planned.requires_resolution {
-            errors.push(format!(
-                "도메인 대상 '{}'은 이번 버전에서 지원하지 않습니다 (DNS 리졸버 미구현으로 선행 주소 해석 불가, IP 주소를 직접 지정해야 합니다).",
-                planned.target.host
-            ));
-        }
-    }
 
     if errors.is_empty() {
         Ok(plan)
@@ -391,7 +568,6 @@ fn verify_backend_result(
                 ));
             }
 
-            // resolved_ip 교차 오염 검증: target IP가 있는 경우 수치 비교
             if let Some(ref res_ip_str) = res.resolved_ip
                 && let Some(exp_ip) = expected_ip
             {
@@ -525,13 +701,114 @@ async fn run_single_target(
     let mut errors = Vec::new();
 
     let parsed_ip = planned_target.target.host.trim().parse::<IpAddr>().ok();
+    let is_ip = parsed_ip.is_some();
 
-    for (feature_idx, feature) in planned_target.features.iter().enumerate() {
-        // 각 기능 실행 전 취소 여부 확인: 중도 취소 시 미시작 기능은 실행하지 않음
+    let has_dns_feature = planned_target.features.contains(&QuickFeature::DnsLookup);
+    let needs_resolution = planned_target.requires_resolution;
+
+    let should_resolve = if is_ip {
+        has_dns_feature
+    } else {
+        needs_resolution || has_dns_feature
+    };
+
+    let dns_ctx = QuickContext {
+        session_id: exec_ctx.session_id.clone(),
+        timestamp_iso8601: exec_ctx.timestamp_iso8601.clone(),
+        source_host: exec_ctx.source_host.clone(),
+        target_host: planned_target.target.host.clone(),
+        target_port: planned_target.target.port,
+    };
+
+    let mut dns_measurement: Option<DnsMeasurement> = None;
+    let mut dns_quick_result: Option<Result<QuickResult, Vec<String>>> = None;
+    let mut selected_ip: Option<IpAddr> = parsed_ip;
+    let mut dns_failed = false;
+    let mut dns_failure_reason: Option<String> = None;
+
+    // 선행 DNS 해석이 필요한 경우 대상당 정확히 1회만 호출
+    if should_resolve {
         if exec_ctx.cancel.load(Ordering::SeqCst) {
-            break;
-        }
+            dns_failed = true;
+            dns_failure_reason = Some("DNS 해석 시작 전 취소 플래그가 감지되었습니다.".to_string());
+        } else {
+            exec_ctx.counters.dns_lookup.fetch_add(1, Ordering::SeqCst);
+            let timeout = Duration::from_millis(exec_ctx.tcp_timeout_ms);
+            let dns_future =
+                exec_ctx
+                    .backend
+                    .resolve(dns_ctx.clone(), timeout, Arc::clone(&exec_ctx.cancel));
+            let res = dns_future.await;
 
+            match res {
+                Ok(measurement) => {
+                    let q_res = dns_to_quick_result(&dns_ctx, &measurement);
+                    match q_res {
+                        Ok(verified_q_res) => {
+                            if measurement.outcome == crate::dns_engine::OUTCOME_RESOLVED {
+                                if let Some(first_addr_str) = measurement.addresses.first() {
+                                    if let Ok(first_sock) = first_addr_str.parse::<SocketAddr>() {
+                                        let ip = first_sock.ip();
+                                        if is_safe_resolved_ip(ip, planned_target.target.port) {
+                                            if !is_ip {
+                                                selected_ip = Some(ip);
+                                            }
+                                        } else {
+                                            dns_failed = true;
+                                            dns_failure_reason = Some(format!(
+                                                "해석된 첫 번째 주소('{ip}')가 안전하지 않은 주소(미지정/멀티캐스트/브로드캐스트/링크로컬)로 거부되었습니다."
+                                            ));
+                                        }
+                                    } else {
+                                        dns_failed = true;
+                                        dns_failure_reason = Some(format!(
+                                            "해석된 주소('{first_addr_str}')가 정규 SocketAddr 표기가 아닙니다."
+                                        ));
+                                    }
+                                } else {
+                                    dns_failed = true;
+                                    dns_failure_reason = Some(
+                                        "RESOLVED 상태이나 반환된 주소 목록이 비어 있습니다."
+                                            .to_string(),
+                                    );
+                                }
+                            } else {
+                                dns_failed = true;
+                                dns_failure_reason = Some(format!(
+                                    "DNS 해석 결과가 성공(RESOLVED)이 아닙니다 (결과 상태: '{}').",
+                                    measurement.outcome
+                                ));
+                            }
+                            dns_quick_result = Some(Ok(verified_q_res));
+                        }
+                        Err(val_errs) => {
+                            let msg = format!("DNS 결과 유효성 검증 실패: {}", val_errs.join("; "));
+                            errors.push(msg.clone());
+                            dns_failed = true;
+                            dns_failure_reason = Some(msg);
+                            dns_quick_result = Some(Err(val_errs));
+                        }
+                    }
+                    dns_measurement = Some(measurement);
+                }
+                Err(backend_errs) => {
+                    let msg = format!("DNS 백엔드 호출 실패: {}", backend_errs.join("; "));
+                    errors.push(msg.clone());
+                    dns_failed = true;
+                    dns_failure_reason = Some(msg);
+                    dns_quick_result = Some(Err(backend_errs));
+                }
+            }
+        }
+    }
+
+    // 도메인 대상인 경우 DNS 해석 실패 시 연결 승격 금지
+    if !is_ip && dns_failed {
+        selected_ip = None;
+    }
+
+    // 선택된 기능들을 순서대로 처리
+    for (feature_idx, feature) in planned_target.features.iter().enumerate() {
         let ctx = QuickContext {
             session_id: exec_ctx.session_id.clone(),
             timestamp_iso8601: exec_ctx.timestamp_iso8601.clone(),
@@ -541,15 +818,54 @@ async fn run_single_target(
         };
 
         match feature {
-            QuickFeature::TcpConnect => {
-                let Some(ip) = parsed_ip else {
-                    let err_msg = format!(
-                        "TCP 연결 프로브를 위한 유효한 대상 IP 주소가 없습니다: '{}'",
-                        planned_target.target.host
+            QuickFeature::DnsLookup => {
+                if let Some(dns_res) = &dns_quick_result {
+                    match dns_res {
+                        Ok(q_res) => {
+                            results.push((feature_idx, q_res.clone()));
+                        }
+                        Err(errs) => {
+                            let err_msg = format!("DNS 해석 실패: {}", errs.join("; "));
+                            let local_err = make_local_error_result(
+                                &ctx,
+                                QuickFeature::DnsLookup,
+                                None,
+                                err_msg,
+                            );
+                            results.push((feature_idx, local_err));
+                        }
+                    }
+                } else if exec_ctx.cancel.load(Ordering::SeqCst) {
+                    let cancel_res = make_local_error_result(
+                        &ctx,
+                        QuickFeature::DnsLookup,
+                        None,
+                        "진단 실행 취소로 인해 DNS 조회가 실행되지 않았습니다.".to_string(),
                     );
-                    errors.push(err_msg.clone());
-                    let res =
-                        make_local_error_result(&ctx, QuickFeature::TcpConnect, None, err_msg);
+                    results.push((feature_idx, cancel_res));
+                } else {
+                    let unavail_res = make_unavailable_result(
+                        &ctx,
+                        QuickFeature::DnsLookup,
+                        "DNS 조회가 실행되지 않았습니다.".to_string(),
+                    );
+                    results.push((feature_idx, unavail_res));
+                }
+            }
+
+            QuickFeature::TcpConnect => {
+                if exec_ctx.cancel.load(Ordering::SeqCst) {
+                    break;
+                }
+
+                let Some(ip) = selected_ip else {
+                    let reason = dns_failure_reason.clone().unwrap_or_else(|| {
+                        format!(
+                            "TCP 연결 프로브를 위한 유효한 대상 IP 주소가 없습니다: '{}'",
+                            planned_target.target.host
+                        )
+                    });
+                    let res = make_unavailable_result(&ctx, QuickFeature::TcpConnect, reason);
                     results.push((feature_idx, res));
                     continue;
                 };
@@ -557,7 +873,6 @@ async fn run_single_target(
                 let socket_addr = SocketAddr::new(ip, planned_target.target.port);
                 let timeout = Duration::from_millis(exec_ctx.tcp_timeout_ms);
 
-                // 백엔드 메소드를 실제 호출하는 순간에만 카운터 증가
                 exec_ctx.counters.tcp_connect.fetch_add(1, Ordering::SeqCst);
 
                 let backend_future = exec_ctx.backend.tcp(
@@ -568,24 +883,34 @@ async fn run_single_target(
                 );
                 let backend_res = backend_future.await;
 
-                let verified = verify_backend_result(
+                let mut verified = verify_backend_result(
                     &ctx,
                     QuickFeature::TcpConnect,
                     Some(ip),
                     backend_res,
                     &mut errors,
                 );
+
+                if !is_ip && let Some(ref dns_m) = dns_measurement {
+                    append_domain_resolution_limitations(&mut verified, dns_m, ip);
+                }
+
                 results.push((feature_idx, verified));
             }
 
             QuickFeature::IcmpPing => {
-                let Some(ip) = parsed_ip else {
-                    let err_msg = format!(
-                        "ICMP Ping 프로브를 위한 유효한 대상 IP 주소가 없습니다: '{}'",
-                        planned_target.target.host
-                    );
-                    errors.push(err_msg.clone());
-                    let res = make_local_error_result(&ctx, QuickFeature::IcmpPing, None, err_msg);
+                if exec_ctx.cancel.load(Ordering::SeqCst) {
+                    break;
+                }
+
+                let Some(ip) = selected_ip else {
+                    let reason = dns_failure_reason.clone().unwrap_or_else(|| {
+                        format!(
+                            "ICMP Ping 프로브를 위한 유효한 대상 IP 주소가 없습니다: '{}'",
+                            planned_target.target.host
+                        )
+                    });
+                    let res = make_unavailable_result(&ctx, QuickFeature::IcmpPing, reason);
                     results.push((feature_idx, res));
                     continue;
                 };
@@ -603,25 +928,34 @@ async fn run_single_target(
                         .icmp(ctx.clone(), ip, timeout, Arc::clone(&exec_ctx.cancel));
                 let backend_res = backend_future.await;
 
-                let verified = verify_backend_result(
+                let mut verified = verify_backend_result(
                     &ctx,
                     QuickFeature::IcmpPing,
                     Some(ip),
                     backend_res,
                     &mut errors,
                 );
+
+                if !is_ip && let Some(ref dns_m) = dns_measurement {
+                    append_domain_resolution_limitations(&mut verified, dns_m, ip);
+                }
+
                 results.push((feature_idx, verified));
             }
 
             QuickFeature::LocalNetwork => {
-                let Some(ip) = parsed_ip else {
-                    let err_msg = format!(
-                        "로컬 네트워크 스냅샷 수집을 위한 유효한 대상 IP 주소가 없습니다: '{}'",
-                        planned_target.target.host
-                    );
-                    errors.push(err_msg.clone());
-                    let res =
-                        make_local_error_result(&ctx, QuickFeature::LocalNetwork, None, err_msg);
+                if exec_ctx.cancel.load(Ordering::SeqCst) {
+                    break;
+                }
+
+                let Some(ip) = selected_ip else {
+                    let reason = dns_failure_reason.clone().unwrap_or_else(|| {
+                        format!(
+                            "로컬 네트워크 스냅샷 수집을 위한 유효한 대상 IP 주소가 없습니다: '{}'",
+                            planned_target.target.host
+                        )
+                    });
+                    let res = make_unavailable_result(&ctx, QuickFeature::LocalNetwork, reason);
                     results.push((feature_idx, res));
                     continue;
                 };
@@ -637,48 +971,28 @@ async fn run_single_target(
                         .host(ctx.clone(), ip, Arc::clone(&exec_ctx.cancel));
                 let backend_res = backend_future.await;
 
-                let verified = verify_backend_result(
+                let mut verified = verify_backend_result(
                     &ctx,
                     QuickFeature::LocalNetwork,
                     Some(ip),
                     backend_res,
                     &mut errors,
                 );
+
+                if !is_ip && let Some(ref dns_m) = dns_measurement {
+                    append_domain_resolution_limitations(&mut verified, dns_m, ip);
+                }
+
                 results.push((feature_idx, verified));
             }
 
-            QuickFeature::DnsLookup | QuickFeature::IcmpTraceroute => {
-                // 이번 slice에서는 DNS/Trace 프로브가 미구현이므로 백엔드 호출 0회, 명시적 UNAVAILABLE 행 생성
-                let feature_name = feature.as_str();
-                let details = serde_json::json!({
-                    "outcome": "UNAVAILABLE",
-                    "limitations": [
-                        format!("'{feature_name}' 프로브는 이번 마일스톤(QG2)에서 지원되지 않으며 백엔드 호출 없이 UNAVAILABLE로 처리되었습니다.")
-                    ],
-                    "raw_measurement": {}
-                });
-
-                let unavailable_res = QuickResult {
-                    schema_version: QUICK_SCHEMA_VERSION.to_string(),
-                    product: QUICK_PRODUCT_NAME.to_string(),
-                    session_id: ctx.session_id.clone(),
-                    timestamp_iso8601: ctx.timestamp_iso8601.clone(),
-                    source_host: ctx.source_host.clone(),
-                    target_host: ctx.target_host.clone(),
-                    resolved_ip: parsed_ip.map(|ip| ip.to_string()),
-                    target_port: ctx.target_port,
-                    feature: *feature,
-                    status: QuickStatus::UNKNOWN,
-                    elapsed_ms: None,
-                    os_error_code: None,
-                    details,
-                    evidence_level: EvidenceLevel::UNKNOWN,
-                };
-
-                if let Err(e) = validate_quick_result(&unavailable_res) {
-                    errors.extend(e);
-                }
-                results.push((feature_idx, unavailable_res));
+            QuickFeature::IcmpTraceroute => {
+                let unavail_res = make_unavailable_result(
+                    &ctx,
+                    QuickFeature::IcmpTraceroute,
+                    "'icmp_traceroute' 프로브는 이번 마일스톤(QG2)에서 지원되지 않으며 백엔드 호출 없이 UNAVAILABLE로 처리되었습니다.".to_string(),
+                );
+                results.push((feature_idx, unavail_res));
             }
         }
     }
@@ -692,7 +1006,8 @@ async fn run_single_target(
 
 /// Network Quick Check 진단을 실행합니다.
 ///
-/// - 사전 검증을 통해 유효하지 않은 대상/옵션 및 도메인 대상을 사전에 차단합니다.
+/// - 사전 검증을 통해 유효하지 않은 대상/옵션 입력을 사전에 차단합니다.
+/// - 도메인 및 IP 대상 모두 단일 대상 안에서 필요한 사전 DNS 해석을 처리합니다.
 /// - 동시 대상 작업 수는 `request.options.concurrency` (최대 4) 이하로 엄격히 제한됩니다.
 /// - `JoinSet`을 이용하여 최대 `concurrency`개만 동시 실행하며, 100개 작업을 미리 생성하지 않습니다.
 /// - 중도 취소 또는 메모리 예산 초과 시 미시작 작업은 실행하지 않고 실행 중인 태스크를 정상 drain합니다.
