@@ -3,7 +3,7 @@
 ## 1. 개요
 Network Quick Check는 별도의 설치 과정 없이 Windows 단일 실행 파일(EXE)을 복사하여 즉시 IP:Port 통신 상태를 진단할 수 있도록 기획된 경량 네트워크 진단 도구입니다.
 
-- **현재 단계**: 공유 Core의 TCP·Ping·로컬 정보·필수/선택 DNS·선택 ICMP Trace 실행기 연결까지 제한 범위 수용. 제품 GUI·EXE는 아직 미구현이며 전체 QG2는 실환경 검증 전 미수용. 최신 근거는 아래 후속 판정 및 `artifacts/qg2e-trace-runner-acceptance.json`이다.
+- **현재 단계**: 공유 Core의 선택 실행기와 제품 동일 EXE DNS worker 진입점·현재 EXE backend factory까지 제한 범위 수용. worker 통신을 검증한 개발용 debug EXE는 있으나, 사용자가 진단을 시작하는 경로와 GUI·배포용 제품은 아직 미구현이다. 전체 QG2도 실환경 검증 전 미수용이다. 최신 근거는 `artifacts/qg2f-app-entry-acceptance.json`이다.
 - **공통 기반**: `crates/network-core` facade를 통해 기존 `npi-core` 및 `npi-probes` 구현을 재사용(기존 Inspector는 그대로 보존).
 - **의존성 배제**: WebView, Npcap, Agent, PDF, SQLite 라이브러리를 일체 포함하지 않음.
 
@@ -35,4 +35,12 @@ Network Quick Check는 별도의 설치 과정 없이 Windows 단일 실행 파�
 - 수용은선택Trace연결+기존DNS실행정책보존범위만. Trace미선택호출0·domain첫검증IP만·IP상세DNS독립·raw/canonical무보정·실측IPnonnull·OS코드None/원시exit구분·완료DNS와진행중await/drain/보관한도유지. Notify취소는합성future증거이지실제OS프로세스취소인증아님.
 - source보존local commit 613d07da26aecb0a06d7c43da56120ef8135aa05, 전용worktree clean. root는기존작업을그대로보존해dirty일수있으며전체branch merge/원격push/배포없음. acceptance artifact: artifacts/qg2e-trace-runner-acceptance.json. 이전DNS수용source는역사로보존하고최신동일DNS정책근거는이수용을참조한다.
 - 전체QG2는승인실VLAN/DROP/ICMP차단·다중NIC/VPN등환경검증부재로미수용. 제품동일EXE resolver dispatch/Win32GUI/TXT·CSV/PE·서명/VM·일반사용자/성능과Inspector전체G2미완료.
+
+
+## 제품 동일 EXE DNS worker 진입점 root 조합회귀·제한 범위 수용 — 2026-10-22T16:26:35.728972+09:00
+- deleg_c26f9c10 최종두정적QA 모두findings=[]·기존7종해소. 부모가최종4appSHA/전용worktree clean/실제순수12·CLI38·소유localhost IPC1/기존lock24패키지전체불변을확인한뒤app4+workspace/lock2만root선택통합했다. Core/resolver/Inspector소스변경0·Inspector보호61SHA불변.
+- root workspace427PASS/23ignored;명시native23PASS/0ignored;Trace경계14/DNS경계6PASS;strictClippy/fmt exit0. 고정root제품EXE의명령행38PASS와부모boundedChild감독기6PASS도다시실행했다. native23은기존22+새제품worker IPC1이며app12는427에포함·서로합산하지않음.
+- 수용은엄격worker selector/arity/원본host·port사전검증/거부원문비반사/단일JSON·16384byte/write·flush실패/현재EXE backend factory/동일제품EXE localhost IPC만. noargs/help는정적stderr안내만하며진단을자동실행하지않는다. factory만으로명시진단run_quick종단경로가구현됐다고주장하지않음.
+- 부모QA증거수집첫시도는잘린human transcript본문JSON파싱오류로root수정전중단했다. 완전한async최종응답에서정규화한판정과잘린transcriptSHA/완료prefix를구분해보존·복구했으며제품실패/QA미수신을성공으로위장하지않았다. artifacts/qg2f-app-entry-final-review-delivery.json 참조.
+- source보존local commit a04f9da59a6875d4fc4a1f7d6f162bce6b83168f;root는기존미커밋변경보존·전체branch merge/원격push/배포없음. artifacts/qg2f-app-entry-acceptance.json. 전체QG2실VLAN/DROP/ICMP차단·다중NIC/VPN미수용,GUI/QG3/명시진단시작경로/TXT·CSV/Release/PE/CRT/서명/VM·일반사용자/성능미완료. debug EXE는worker기반확인용이며배포용진단제품이아니다.
 
