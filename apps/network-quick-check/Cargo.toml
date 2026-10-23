@@ -11,6 +11,6 @@ path = "src/main.rs"
 
 [dependencies]
 network-core = { path = "../../crates/network-core" }
-
-[dev-dependencies]
-tokio = { version = "=1.52.3", features = ["rt", "time"] }
+serde_json = { workspace = true }
+# 명시 개발용 경로에서만 런타임·신호 수신을 시작한다. 기존 버전을 직접 선언한다.
+tokio = { version = "=1.52.3", features = ["rt", "time", "net", "signal", "sync", "macros"] }

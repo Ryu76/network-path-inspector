@@ -116,3 +116,12 @@ PRD 23절에 정의된 통합 수용 시나리오를 Quick Check 품질 게이�
 - 수용은같은원시DTO→양실제projector의순수characterization과승인된public접근만. CANCELLED/LOCAL_ERROR/DNS_ERROR/unknown의기존제품별차이를그대로명시하며실제순차TCP결과일치/패킷관측/EngineEnvelope·Archive·Session저장검증으로승격하지않는다. PRD23.4보조순수근거이지전체통합수용아님.
 - 전체QG2실환경·GUI/QG3·제품진단시작경로/TXT·CSV/Release/PE/CRT/서명/VM·일반사용자/OS지원/성능미완료. 이전worker기반과공용resolver/Trace정책수용은불변으로유지했다.
 
+
+## 소유 IPv4/IPv6 양제품 실제 TCP 비교 root 제한 수용 — 2026-10-23T12:44:22.467960+09:00
+- 최종독립QA deleg_5a10ae9f 두검토모두findings=[]·실행안전true·초기F1~F4해소/기존3000ms입력채택은판정정규화나제품성능목표완화아님을확인. 부모고정SHA e926cb55d672b81d655160d9d4330a651877528d4de42eb82df34a9c84720f5c source로실행/원문증거대조후새test1파일만root선택통합했다. production/기존test/manifest/lock변경0.
+- root 기본회귀434PASS/27ignored·명시native27PASS/0ignored(기존23+새IPv4/IPv6성공/거부4)·Trace경계14/DNS경계6PASS·strictClippy/fmt exit0. 실제root제품EXE CLI38PASS·bounded감독기6PASS도재검증. 새pure1은434에포함·새native4는27에포함·합산통계로과장하지않음.
+- 실제run_profile메모리EngineEnvelope의TCPraw와실제run_quick/native결과를각자기대값/귀속/OS원문/nullable/전체raw에대조·같은Inspectorraw→실제Quickprojector replay는별도정확동등축. 성공각acceptpeer·실제EOF/수신애플리케이션바이트0관찰. 다른native시점elapsed/clientport전체의동일/상이조건요구0·TCP외프로브0. Archive/정규Session/패킷/서비스정상인증아님.
+- 초기직렬화byte오판4FAIL→전체JSON값동등성수정뒤1000ms2PASS2FAIL(TIMED_OUT)→제품기존기본입력3000ms4PASS의실패/특성규명기록을보존했다. 이후F2~F4추가강화동일SHA로W/root모두재실행. 1000ms거부조건통과를주장하지않고3000ms의DROP성능시험으로치환하지도않는다. bound/nonlisten은독점예약/모든race제거보장아님.
+- Inspector원본60SHA+기승인pub4byte1예외불변·원래baseline61해시목록미수정. Wclean/보존localcommit 8e9d76fedafe3645e89631acf7fe0baef0a159ae·root기존미커밋변경보존·원격push/배포/전체branch merge없음. artifacts/qg2h-tcp-native-acceptance.json.
+- 전체QG2실VLAN/DROP/ICMP차단/다중NIC/VPN·제품EXE명시진단시작/GUI/QG3이후·Release/PE/CRT/서명/VM·일반사용자/OS지원/성능미완료. timestamp/source_host는이번null입력범위만·connect_once반환직전DTO별도capture/OS즉시회수인증아님.
+
