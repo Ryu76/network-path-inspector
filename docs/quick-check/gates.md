@@ -107,3 +107,12 @@ PRD 23절에 정의된 통합 수용 시나리오를 Quick Check 품질 게이�
 - 부모QA증거수집첫시도는잘린human transcript본문JSON파싱오류로root수정전중단했다. 완전한async최종응답에서정규화한판정과잘린transcriptSHA/완료prefix를구분해보존·복구했으며제품실패/QA미수신을성공으로위장하지않았다. artifacts/qg2f-app-entry-final-review-delivery.json 참조.
 - source보존local commit a04f9da59a6875d4fc4a1f7d6f162bce6b83168f;root는기존미커밋변경보존·전체branch merge/원격push/배포없음. artifacts/qg2f-app-entry-acceptance.json. 전체QG2실VLAN/DROP/ICMP차단·다중NIC/VPN미수용,GUI/QG3/명시진단시작경로/TXT·CSV/Release/PE/CRT/서명/VM·일반사용자/성능미완료. debug EXE는worker기반확인용이며배포용진단제품이아니다.
 
+
+## 승인된 TCP 공개변경·양제품 실제 projector 순수 replay root 제한 수용 — 2026-10-23T10:56:57.010993+09:00
+- 사용자명시「허용」범위대로Inspector apply_tcp_result에pub 4바이트만추가·함수본문/상태/오류/측정동작완전불변. root원본보호60SHA불변+승인된engine1개가시성예외를별도기록했고원래보호baseline61목록/해시는수정하지않았다. 기존61불변은이전시점이며최신판정은60+1승인delta다.
+- Flash test1파일작성·부모기대문구정정/실제중복·nullablemeta/모든matrix raw/OScode/duration/stale/불변성보강·동일source실행을거쳤다. 가시성QA deleg_6b0609ec 및최종test QA deleg_fa9790f8 두검토모두findings=[]·실제두함수호출/독립기대값/제품별차이무보정/순수성확인. QA요청뒤doc공백한줄차이는역SHA증명·실행코드/단언변경0.
+- root workspace433PASS/23ignored·명시native23PASS/0ignored·Trace경계14/DNS경계6PASS·strictClippy/fmt exit0. 고정root제품EXE CLI38PASS·bounded감독기6PASS도재실행. 새replay6은433에포함되며native수추가0·서로합산하지않음. 함수공개전E0603와최초5PASS1FAIL/Clippy101증거는보존했다.
+- 제품코드/시험은engine와새replay시험2파일만선택통합·Cargo/lock/계약/worker source불변. 보존local commit 6ce05a322823659b53df6d5a6032ee6673dcd692·전용worktree clean;root는기존미커밋작업보존·원격push/배포/전체branch merge없음. artifacts/qg2g-tcp-replay-acceptance.json.
+- 수용은같은원시DTO→양실제projector의순수characterization과승인된public접근만. CANCELLED/LOCAL_ERROR/DNS_ERROR/unknown의기존제품별차이를그대로명시하며실제순차TCP결과일치/패킷관측/EngineEnvelope·Archive·Session저장검증으로승격하지않는다. PRD23.4보조순수근거이지전체통합수용아님.
+- 전체QG2실환경·GUI/QG3·제품진단시작경로/TXT·CSV/Release/PE/CRT/서명/VM·일반사용자/OS지원/성능미완료. 이전worker기반과공용resolver/Trace정책수용은불변으로유지했다.
+
