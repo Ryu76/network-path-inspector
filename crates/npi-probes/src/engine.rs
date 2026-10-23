@@ -449,7 +449,7 @@ fn apply_host_snapshot_result(
     }
 }
 
-fn apply_tcp_result(row: &mut FeatureResult, meas: &TcpMeasurement) {
+pub fn apply_tcp_result(row: &mut FeatureResult, meas: &TcpMeasurement) {
     row.evidence_ids.clear();
     row.started_at_utc = None;
     row.ended_at_utc = None;
