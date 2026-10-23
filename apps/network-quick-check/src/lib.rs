@@ -28,6 +28,8 @@ use std::ffi::OsString;
 use std::io::Write;
 use std::path::PathBuf;
 
+mod diagnostic_cli;
+
 /// 인자 없이 실행되었을 때 stderr에 출력하는 정적 메시지.
 pub const NOARGS_STDERR: &str = "Network Quick Check: 진단 실행 진입점은 아직 제공하지 않습니다.\n";
 
@@ -197,10 +199,18 @@ where
 
 /// Network Quick Check 진입점을 실행하고 종료 코드를 반환합니다.
 ///
-/// - `0`: 인자 없는 진입 성공, `--help` 출력 성공, 또는 worker 결과 출력 성공.
-/// - `1`: stdout 또는 stderr 쓰기/플러시 실패, 결과 상한 초과 등 I/O 오류.
+/// - 명시 개발용 단일 대상 TCP 진입점(`--dev-tcp-once-v1`)인 경우 `diagnostic_cli::try_entry`로
+///   선행 분기하여 실행합니다.
+/// - 해당 selector가 아닌 경우 기존의 레거시 worker/idle/help 진입 로직인 `entry_with_worker`로
+///   정확히 위임합니다.
+/// - `0`: 인자 없는 진입 성공, `--help` 출력 성공, worker 결과 출력 성공, 또는 유효 진단 보고서 출력 완료.
+/// - `1`: stdout 또는 stderr 쓰기/플러시 실패, 결과 상한 초과, 로컬 오류 등 I/O 오류.
 /// - `2`: 잘못되거나 지원하지 않는 인자 (정적 오류 메시지 출력 완료).
+/// - `3`: 오류 없이 진단 실행이 취소되고 취소 보고서 출력이 완료됨.
 pub fn entry(args: &[OsString], stdout: &mut dyn Write, stderr: &mut dyn Write) -> u8 {
+    if let Some(code) = diagnostic_cli::try_entry(args, stdout, stderr) {
+        return code;
+    }
     entry_with_worker(
         args,
         stdout,
