@@ -33,6 +33,7 @@ mod diagnostic_cli;
 mod gui_coordinator;
 mod gui_entry;
 mod gui_presenter;
+pub mod gui_result_render;
 pub mod gui_state;
 #[cfg(windows)]
 mod native_gui;
