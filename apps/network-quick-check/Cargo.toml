@@ -18,3 +18,7 @@ tokio = { version = "=1.52.3", features = ["rt", "time", "net", "signal", "sync"
 # 소유 Child의 비동기 감독은 ignored native 시험에서만 사용한다.
 [dev-dependencies]
 tokio = { version = "=1.52.3", features = ["process"] }
+
+# 네이티브 입력 화면만 사용하는 고정 Win32 바인딩. 부모가 준비한다.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_UI_WindowsAndMessaging", "Win32_UI_Controls", "Win32_UI_Input_KeyboardAndMouse"] }

@@ -67,6 +67,7 @@ dependencies = [
  "network-core",
  "serde_json",
  "tokio",
+ "windows-sys",
 ]
 
 [[package]]
