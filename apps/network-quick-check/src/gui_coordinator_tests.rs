@@ -152,6 +152,15 @@ fn state() -> GuiState {
 fn spawn(backend: Arc<dyn QuickProbeBackend>, config: WorkerConfig) -> GuiRunCoordinator {
     GuiRunCoordinator::spawn_with(backend, config, |job| thread::Builder::new().spawn(job)).unwrap()
 }
+fn spawn_native_test(
+    backend: Arc<dyn QuickProbeBackend>,
+    config: WorkerConfig,
+) -> GuiRunCoordinator {
+    GuiRunCoordinator::spawn_with_mode(HostRuntimeMode::NativeIoOnce, backend, config, |job| {
+        thread::Builder::new().spawn(job)
+    })
+    .unwrap()
+}
 /// guard의 release 목록은 worker 시작 전에 만든다. assertion unwind에서도 생산 종료 경로를 통과한다.
 struct Fixture {
     coordinator: Option<GuiRunCoordinator>,
@@ -167,6 +176,18 @@ impl Fixture {
     ) -> Self {
         Self {
             coordinator: Some(spawn(backend, config)),
+            state: state(),
+            releases,
+            cleanup_observed: Arc::new(AtomicBool::new(false)),
+        }
+    }
+    fn new_native(
+        backend: Arc<dyn QuickProbeBackend>,
+        config: WorkerConfig,
+        releases: Vec<Arc<Gate>>,
+    ) -> Self {
+        Self {
+            coordinator: Some(spawn_native_test(backend, config)),
             state: state(),
             releases,
             cleanup_observed: Arc::new(AtomicBool::new(false)),
@@ -290,6 +311,7 @@ fn manual() -> (
     let (done_tx, done_rx) = mpsc::sync_channel(1);
     (
         GuiRunCoordinator {
+            runtime_mode: HostRuntimeMode::CpuOnlyPerRun,
             start_tx: Some(tx),
             completion_rx: Some(done_rx),
             worker: None,
@@ -759,7 +781,12 @@ fn missing_targets_fail_atomically_without_consuming_run_id() {
     let id = c.try_start(&mut s).unwrap();
     assert_eq!(id, expected);
     rx.try_recv().unwrap();
-    tx.send(Completion { id, result: rich() }).unwrap();
+    tx.send(Completion {
+        terminal_host_failure: false,
+        id,
+        result: rich(),
+    })
+    .unwrap();
     c.poll(&mut s);
     finish_manual(&mut c, &mut s, tx);
 }
@@ -843,6 +870,7 @@ fn rich_matching_report_and_error_are_applied_whole_and_snapshot_retained() {
         let id = c.try_start(&mut s).unwrap();
         let cmd = rx.try_recv().unwrap();
         tx.send(Completion {
+            terminal_host_failure: false,
             id,
             result: result.clone(),
         })
@@ -919,6 +947,7 @@ fn all_start_failure_classes_preserve_whole_state_context_and_next_id() {
             assert_eq!(c.try_start(&mut s).unwrap(), expected_id);
             let cmd = receiver.as_ref().unwrap().try_recv().unwrap();
             tx.send(Completion {
+                terminal_host_failure: false,
                 id: cmd.snapshot.run_id(),
                 result: rich(),
             })
@@ -934,58 +963,96 @@ fn all_start_failure_classes_preserve_whole_state_context_and_next_id() {
 }
 #[test]
 fn active_stale_duplicate_and_following_execution_preserve_state_and_arc() {
-    let (mut c, rx, tx) = manual();
-    let (mut s, old) = finished();
-    let id = c.try_start(&mut s).unwrap();
-    let cmd = rx.try_recv().unwrap();
-    let before = s.clone();
-    let cancel = c.inflight.as_ref().unwrap().cancel.clone();
-    tx.send(Completion {
-        id: old.run_id(),
-        result: rich(),
-    })
-    .unwrap();
-    assert_eq!(c.poll(&mut s), PollOutcome::Stale(old.run_id()));
-    assert_eq!(s, before);
-    assert!(Arc::ptr_eq(&cancel, &c.inflight.as_ref().unwrap().cancel));
-    assert!(!cancel.load(Ordering::SeqCst));
-    tx.send(Completion { id, result: rich() }).unwrap();
-    assert_eq!(c.poll(&mut s), PollOutcome::Applied(id));
-    assert_eq!(c.completed_snapshot(), Some(&cmd.snapshot));
-    let next = c.try_start(&mut s).unwrap();
-    let next_cmd = rx.try_recv().unwrap();
-    let before = s.clone();
-    tx.send(Completion { id, result: rich() }).unwrap();
-    assert_eq!(c.poll(&mut s), PollOutcome::Stale(id));
-    assert_eq!(s, before);
-    tx.send(Completion {
-        id: next,
-        result: rich(),
-    })
-    .unwrap();
-    assert_eq!(c.poll(&mut s), PollOutcome::Applied(next));
-    assert_eq!(c.completed_snapshot(), Some(&next_cmd.snapshot));
-    finish_manual(&mut c, &mut s, tx);
+    // 같은 생산 poll에서 terminal flag false/true 둘 다 ID 검사보다 앞서 고장으로 처리되지 않아야 한다.
+    for terminal_host_failure in [false, true] {
+        let (mut c, rx, tx) = manual();
+        let (mut s, old) = finished();
+        c.completed_snapshot = Some(old.clone());
+        let id = c.try_start(&mut s).unwrap();
+        let cmd = rx.try_recv().unwrap();
+        let before = s.clone();
+        let cancel = c.inflight.as_ref().unwrap().cancel.clone();
+        let previous_snapshot = c.completed_snapshot().cloned();
+        tx.send(Completion {
+            terminal_host_failure,
+            id: old.run_id(),
+            result: rich(),
+        })
+        .unwrap();
+        assert_eq!(c.poll(&mut s), PollOutcome::Stale(old.run_id()));
+        assert_eq!(s, before);
+        assert!(Arc::ptr_eq(&cancel, &c.inflight.as_ref().unwrap().cancel));
+        assert!(!cancel.load(Ordering::SeqCst));
+        assert_eq!(c.inflight.as_ref().unwrap().snapshot, cmd.snapshot);
+        assert_eq!(c.lifecycle(), HostLifecycle::Accepting);
+        assert!(c.start_tx.is_some());
+        assert_eq!(c.completed_snapshot(), previous_snapshot.as_ref());
+        tx.send(Completion {
+            terminal_host_failure: false,
+            id,
+            result: rich(),
+        })
+        .unwrap();
+        assert_eq!(c.poll(&mut s), PollOutcome::Applied(id));
+        assert_eq!(s.last_result(), Some(&rich()));
+        assert_eq!(c.completed_snapshot(), Some(&cmd.snapshot));
+        let next = c.try_start(&mut s).unwrap();
+        let next_cmd = rx.try_recv().unwrap();
+        let before = s.clone();
+        let next_cancel = c.inflight.as_ref().unwrap().cancel.clone();
+        let completed = c.completed_snapshot().cloned();
+        tx.send(Completion {
+            terminal_host_failure,
+            id,
+            result: rich(),
+        })
+        .unwrap();
+        assert_eq!(c.poll(&mut s), PollOutcome::Stale(id));
+        assert_eq!(s, before);
+        assert!(Arc::ptr_eq(
+            &next_cancel,
+            &c.inflight.as_ref().unwrap().cancel
+        ));
+        assert!(!next_cancel.load(Ordering::SeqCst));
+        assert_eq!(c.inflight.as_ref().unwrap().snapshot, next_cmd.snapshot);
+        assert_eq!(c.lifecycle(), HostLifecycle::Accepting);
+        assert!(c.start_tx.is_some());
+        assert_eq!(c.completed_snapshot(), completed.as_ref());
+        tx.send(Completion {
+            terminal_host_failure: false,
+            id: next,
+            result: rich(),
+        })
+        .unwrap();
+        assert_eq!(c.poll(&mut s), PollOutcome::Applied(next));
+        assert_eq!(s.last_result(), Some(&rich()));
+        assert_eq!(c.completed_snapshot(), Some(&next_cmd.snapshot));
+        finish_manual(&mut c, &mut s, tx);
+        assert_eq!(c.lifecycle(), HostLifecycle::Closed);
+    }
 }
 #[test]
 fn failed_host_does_not_skip_buffered_stale_completion_before_final_drain() {
-    let (mut c, rx, tx) = manual();
-    let (mut s, old) = finished();
-    drop(rx);
-    tx.send(Completion {
-        id: old.run_id(),
-        result: rich(),
-    })
-    .unwrap();
-    let before = s.clone();
-    assert_eq!(c.try_start(&mut s), Err(StartError::ChannelClosed));
-    assert!(!c.is_shutdown_complete());
-    assert_eq!(c.poll(&mut s), PollOutcome::Stale(old.run_id()));
-    assert!(!c.is_shutdown_complete());
-    drop(tx);
-    assert_eq!(c.poll(&mut s), PollOutcome::HostFailed);
-    assert!(c.is_shutdown_complete());
-    assert_eq!(s, before);
+    for terminal_host_failure in [false, true] {
+        let (mut c, rx, tx) = manual();
+        let (mut s, old) = finished();
+        drop(rx);
+        tx.send(Completion {
+            terminal_host_failure,
+            id: old.run_id(),
+            result: rich(),
+        })
+        .unwrap();
+        let before = s.clone();
+        assert_eq!(c.try_start(&mut s), Err(StartError::ChannelClosed));
+        assert!(!c.is_shutdown_complete());
+        assert_eq!(c.poll(&mut s), PollOutcome::Stale(old.run_id()));
+        assert!(!c.is_shutdown_complete());
+        drop(tx);
+        assert_eq!(c.poll(&mut s), PollOutcome::HostFailed);
+        assert!(c.is_shutdown_complete());
+        assert_eq!(s, before);
+    }
 }
 #[test]
 fn assertion_unwind_releases_pending_gate_and_observes_actual_worker_termination() {
@@ -1027,4 +1094,471 @@ fn drop_requests_cancel_and_external_owner_observes_real_thread_exit() {
     until(|| worker.is_finished());
     worker.join().unwrap();
     assert_eq!(exit.load(Ordering::SeqCst), EXIT_NORMAL);
+}
+
+fn noop_waker() -> Waker {
+    use std::task::{RawWaker, RawWakerVTable};
+    unsafe fn clone_fn(p: *const ()) -> RawWaker {
+        RawWaker::new(p, &VTABLE)
+    }
+    unsafe fn wake_fn(_: *const ()) {}
+    unsafe fn wake_by_ref_fn(_: *const ()) {}
+    unsafe fn drop_fn(_: *const ()) {}
+    static VTABLE: RawWakerVTable = RawWakerVTable::new(clone_fn, wake_fn, wake_by_ref_fn, drop_fn);
+    unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &VTABLE)) }
+}
+
+#[test]
+fn native_mode_creates_runtime_once_and_reuses_across_distinct_runs() {
+    let b = Arc::new(MemoryBackend::default());
+    let factory_calls = Arc::new(AtomicUsize::new(0));
+    let calls = factory_calls.clone();
+    let runtime_dropped = Arc::new(AtomicBool::new(false));
+    let dropped = runtime_dropped.clone();
+
+    let (mut cfg, observed) = capture();
+    cfg.runtime_factory = Some(Arc::new(move || {
+        calls.fetch_add(1, Ordering::SeqCst);
+        build_runtime(HostRuntimeMode::NativeIoOnce)
+    }));
+    cfg.on_runtime_drop = Some(Arc::new(move || {
+        dropped.store(true, Ordering::SeqCst);
+    }));
+    let idle = Arc::new(AtomicBool::new(false));
+    let entered = idle.clone();
+    cfg.on_worker_idle = Some(Arc::new(move || entered.store(true, Ordering::SeqCst)));
+
+    let mut f = Fixture::new_native(b.clone(), cfg, vec![]);
+    until(|| idle.load(Ordering::SeqCst));
+    assert_eq!(factory_calls.load(Ordering::SeqCst), 0);
+    assert!(!runtime_dropped.load(Ordering::SeqCst));
+
+    let id1 = f.start();
+    let snap1 = f.state.active_snapshot().unwrap().clone();
+    let cancel1 = f
+        .coordinator
+        .as_ref()
+        .unwrap()
+        .inflight
+        .as_ref()
+        .unwrap()
+        .cancel
+        .clone();
+    f.poll_until(|p| *p == PollOutcome::Applied(id1));
+    assert_eq!(f.state.last_result(), observed.lock().unwrap().as_ref());
+    assert_eq!(
+        f.coordinator.as_ref().unwrap().completed_snapshot(),
+        Some(&snap1)
+    );
+    assert_eq!(factory_calls.load(Ordering::SeqCst), 1);
+    assert!(Arc::ptr_eq(
+        &cancel1,
+        b.cancel.lock().unwrap().as_ref().unwrap()
+    ));
+    assert!(!runtime_dropped.load(Ordering::SeqCst));
+
+    f.state.replace_targets("[::1]:8080").unwrap();
+    let id2 = f.start();
+    assert_ne!(id1, id2);
+    let snap2 = f.state.active_snapshot().unwrap().clone();
+    let cancel2 = f
+        .coordinator
+        .as_ref()
+        .unwrap()
+        .inflight
+        .as_ref()
+        .unwrap()
+        .cancel
+        .clone();
+    assert!(!Arc::ptr_eq(&cancel1, &cancel2));
+
+    f.poll_until(|p| *p == PollOutcome::Applied(id2));
+    assert_eq!(f.state.last_result(), observed.lock().unwrap().as_ref());
+    assert_eq!(
+        f.coordinator.as_ref().unwrap().completed_snapshot(),
+        Some(&snap2)
+    );
+    assert_eq!(factory_calls.load(Ordering::SeqCst), 1);
+    assert!(Arc::ptr_eq(
+        &cancel2,
+        b.cancel.lock().unwrap().as_ref().unwrap()
+    ));
+    assert_eq!(b.tcp_calls.load(Ordering::SeqCst), 2);
+    assert!(!runtime_dropped.load(Ordering::SeqCst));
+
+    f.close();
+    assert!(runtime_dropped.load(Ordering::SeqCst));
+    let c = f.coordinator.as_ref().unwrap();
+    assert_eq!(c.lifecycle(), HostLifecycle::Closed);
+    assert!(c.is_shutdown_complete());
+}
+
+#[test]
+fn time_driver_witness_cpu_disabled_native_enabled_io_is_source_checked_only() {
+    let cpu_rt = build_runtime(HostRuntimeMode::CpuOnlyPerRun).unwrap();
+    let cpu_panic = catch_unwind(AssertUnwindSafe(|| {
+        cpu_rt.block_on(async {
+            let sleep_fut = tokio::time::sleep(Duration::from_millis(100));
+            let mut pinned = Box::pin(sleep_fut);
+            let waker = noop_waker();
+            let mut cx = Context::from_waker(&waker);
+            let _ = pinned.as_mut().poll(&mut cx);
+        });
+    }));
+    assert!(
+        cpu_panic.is_err(),
+        "CPU-only 런타임에서는 time driver 미활성화로 sleep poll 시 panic해야 함"
+    );
+
+    let native_rt = build_runtime(HostRuntimeMode::NativeIoOnce).unwrap();
+    let native_result = catch_unwind(AssertUnwindSafe(|| {
+        native_rt.block_on(async {
+            let sleep_fut = tokio::time::sleep(Duration::from_millis(1000));
+            let mut pinned = Box::pin(sleep_fut);
+            let waker = noop_waker();
+            let mut cx = Context::from_waker(&waker);
+            assert_eq!(pinned.as_mut().poll(&mut cx), Poll::Pending);
+        });
+    }));
+    assert!(
+        native_result.is_ok(),
+        "NativeIoOnce 런타임에서는 time driver가 활성화되어 panic 없이 Pending을 반환해야 함"
+    );
+}
+
+#[test]
+fn native_runtime_init_failure_stops_worker_and_fails_host() {
+    let b = Arc::new(MemoryBackend::default());
+    let factory_calls = Arc::new(AtomicUsize::new(0));
+    let calls = factory_calls.clone();
+
+    let cfg = WorkerConfig {
+        runtime_factory: Some(Arc::new(move || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Err(std::io::Error::other("RAW_NATIVE_INIT_FAIL"))
+        })),
+        ..Default::default()
+    };
+    let mut f = Fixture::new_native(b.clone(), cfg, vec![]);
+    let id = f.start();
+    let snap = f.state.active_snapshot().unwrap().clone();
+
+    f.poll_until(|p| *p == PollOutcome::Applied(id));
+    assert_eq!(
+        f.state.last_result(),
+        Some(&Err(vec!["비동기 런타임 초기화에 실패했습니다.".into()]))
+    );
+    assert_eq!(
+        f.coordinator.as_ref().unwrap().completed_snapshot(),
+        Some(&snap)
+    );
+    assert_eq!(b.tcp_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(b.icmp_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(b.host_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(factory_calls.load(Ordering::SeqCst), 1);
+
+    until(|| {
+        let c = f.coordinator.as_mut().unwrap();
+        c.poll(&mut f.state);
+        c.is_shutdown_complete()
+    });
+
+    let c = f.coordinator.as_ref().unwrap();
+    assert_eq!(c.lifecycle(), HostLifecycle::Failed);
+    assert_eq!(c.worker_exit.load(Ordering::SeqCst), EXIT_RUNTIME_FAILED);
+    assert_eq!(
+        f.coordinator.as_mut().unwrap().poll(&mut f.state),
+        PollOutcome::HostFailed
+    );
+}
+
+#[test]
+fn native_queued_and_pending_cancellation_and_repeatable_close() {
+    {
+        let gate = Arc::new(Gate::default());
+        let g = gate.clone();
+        let b = Arc::new(MemoryBackend::default());
+        let (mut cfg, observed) = capture();
+        cfg.before_run = Some(Arc::new(move || g.blocking()));
+        let mut f = Fixture::new_native(b.clone(), cfg, vec![gate.clone()]);
+        let id = f.start();
+        until(|| gate.entered.load(Ordering::SeqCst));
+        f.coordinator
+            .as_mut()
+            .unwrap()
+            .request_cancel(&mut f.state)
+            .unwrap();
+        gate.release();
+        f.poll_until(|p| *p == PollOutcome::Applied(id));
+        assert_eq!(b.tcp_calls.load(Ordering::SeqCst), 0);
+        assert!(f.state.last_result().unwrap().as_ref().unwrap().cancelled);
+        assert_eq!(f.state.last_result(), observed.lock().unwrap().as_ref());
+        f.close();
+    }
+
+    {
+        let gate = Arc::new(Gate::default());
+        let b = Arc::new(MemoryBackend {
+            gate: Some(gate.clone()),
+            ..Default::default()
+        });
+        let mut f = Fixture::new_native(b.clone(), Default::default(), vec![gate.clone()]);
+        let id = f.start();
+        until(|| gate.entered.load(Ordering::SeqCst));
+        let c = f.coordinator.as_mut().unwrap();
+        c.begin_close(&mut f.state).unwrap();
+        c.begin_close(&mut f.state).unwrap();
+        assert_eq!(f.state.phase(), RunPhase::Cancelling);
+        assert_eq!(c.poll(&mut f.state), PollOutcome::Idle);
+        assert!(!c.is_shutdown_complete());
+
+        gate.release();
+        f.poll_until(|p| *p == PollOutcome::Applied(id));
+        f.close();
+        assert_eq!(
+            f.coordinator.as_ref().unwrap().lifecycle(),
+            HostLifecycle::Closed
+        );
+        assert!(f.coordinator.as_ref().unwrap().is_shutdown_complete());
+    }
+}
+
+#[test]
+fn native_destructor_panic_after_applied_report_preserves_result_and_fails_host() {
+    let b = Arc::new(PanicOnDropBackend(Arc::new(MemoryBackend::default())));
+    let mut f = Fixture::new_native(b, Default::default(), vec![]);
+    let id = f.start();
+    f.poll_until(|p| *p == PollOutcome::Applied(id));
+    let before = f.state.clone();
+    let snapshot = f
+        .coordinator
+        .as_ref()
+        .unwrap()
+        .completed_snapshot()
+        .cloned();
+
+    f.close();
+    let c = f.coordinator.as_ref().unwrap();
+    assert_eq!(c.lifecycle(), HostLifecycle::Failed);
+    assert_eq!(c.worker_exit.load(Ordering::SeqCst), EXIT_PANICKED);
+    assert_eq!(f.state, before);
+    assert_eq!(c.completed_snapshot(), snapshot.as_ref());
+}
+
+#[test]
+fn native_spawn_public_api_creates_native_mode_coordinator() {
+    let b = Arc::new(MemoryBackend::default());
+    let c = GuiRunCoordinator::spawn_native(b.clone()).unwrap();
+    assert_eq!(c.runtime_mode, HostRuntimeMode::NativeIoOnce);
+    let mut f = Fixture {
+        coordinator: Some(c),
+        state: state(),
+        releases: vec![],
+        cleanup_observed: Arc::new(AtomicBool::new(false)),
+    };
+    let id = f.start();
+    f.poll_until(|p| *p == PollOutcome::Applied(id));
+    assert_eq!(b.tcp_calls.load(Ordering::SeqCst), 1);
+    f.close();
+    assert_eq!(
+        f.coordinator.as_ref().unwrap().lifecycle(),
+        HostLifecycle::Closed
+    );
+}
+
+// 원본QA F01/F02/F03와 CPU 정책 보존을 직접 고정하는 부모 회귀시험이다.
+#[test]
+fn parent_native_init_failure_closes_acceptance_before_worker_cleanup_finishes() {
+    let exit_gate = Arc::new(Gate::default());
+    let release = exit_gate.clone();
+    let b = Arc::new(MemoryBackend::default());
+    let cfg = WorkerConfig {
+        runtime_factory: Some(Arc::new(|| {
+            Err(std::io::Error::other("비반사 init fixture"))
+        })),
+        before_exit: Some(Arc::new(move || release.blocking())),
+        ..Default::default()
+    };
+    let mut f = Fixture::new_native(b.clone(), cfg, vec![exit_gate.clone()]);
+    let id = f.start();
+    let snapshot = f.state.active_snapshot().unwrap().clone();
+    until(|| exit_gate.entered.load(Ordering::SeqCst));
+    assert_eq!(
+        f.coordinator.as_mut().unwrap().poll(&mut f.state),
+        PollOutcome::Applied(id)
+    );
+    let before = f.state.clone();
+    let c = f.coordinator.as_mut().unwrap();
+    assert_eq!(c.lifecycle(), HostLifecycle::Failed);
+    assert!(!c.worker.as_ref().unwrap().is_finished());
+    assert!(!c.is_shutdown_complete());
+    assert_eq!(c.completed_snapshot(), Some(&snapshot));
+    assert_eq!(c.try_start(&mut f.state), Err(StartError::NotAccepting));
+    assert_eq!(f.state, before);
+    assert_eq!(c.completed_snapshot(), Some(&snapshot));
+    assert_eq!(b.tcp_calls.load(Ordering::SeqCst), 0);
+    exit_gate.release();
+    f.close();
+    assert_eq!(
+        f.coordinator.as_ref().unwrap().lifecycle(),
+        HostLifecycle::Failed
+    );
+}
+#[test]
+fn parent_public_cpu_constructor_observes_actual_shared_mode_argument() {
+    let b = Arc::new(MemoryBackend::default());
+    let c = GuiRunCoordinator::spawn(b.clone()).unwrap();
+    let mut f = Fixture {
+        coordinator: Some(c),
+        state: state(),
+        releases: vec![],
+        cleanup_observed: Arc::new(AtomicBool::new(false)),
+    };
+    assert_eq!(
+        f.coordinator.as_ref().unwrap().runtime_mode,
+        HostRuntimeMode::CpuOnlyPerRun
+    );
+    assert_eq!(b.tcp_calls.load(Ordering::SeqCst), 0);
+    f.close();
+}
+#[test]
+fn parent_cpu_success_builds_and_drops_one_runtime_per_run_after_idle_handshake() {
+    let b = Arc::new(MemoryBackend::default());
+    let builds = Arc::new(AtomicUsize::new(0));
+    let count = builds.clone();
+    let drops = Arc::new(AtomicUsize::new(0));
+    let dropped = drops.clone();
+    let idle = Arc::new(AtomicBool::new(false));
+    let entered = idle.clone();
+    let (mut cfg, observed) = capture();
+    cfg.runtime_factory = Some(Arc::new(move || {
+        count.fetch_add(1, Ordering::SeqCst);
+        build_runtime(HostRuntimeMode::CpuOnlyPerRun)
+    }));
+    cfg.on_runtime_drop = Some(Arc::new(move || {
+        dropped.fetch_add(1, Ordering::SeqCst);
+    }));
+    cfg.on_worker_idle = Some(Arc::new(move || entered.store(true, Ordering::SeqCst)));
+    let mut f = Fixture::new(b, cfg, vec![]);
+    until(|| idle.load(Ordering::SeqCst));
+    assert_eq!(builds.load(Ordering::SeqCst), 0);
+    for n in 1..=2 {
+        let id = f.start();
+        let snapshot = f.state.active_snapshot().unwrap().clone();
+        f.poll_until(|p| *p == PollOutcome::Applied(id));
+        assert_eq!(builds.load(Ordering::SeqCst), n);
+        assert_eq!(drops.load(Ordering::SeqCst), n);
+        assert_eq!(f.state.last_result(), observed.lock().unwrap().as_ref());
+        assert_eq!(
+            f.coordinator.as_ref().unwrap().completed_snapshot(),
+            Some(&snapshot)
+        );
+        assert_eq!(
+            f.coordinator.as_ref().unwrap().lifecycle(),
+            HostLifecycle::Accepting
+        );
+    }
+    f.close();
+    assert_eq!(drops.load(Ordering::SeqCst), 2);
+}
+#[test]
+fn parent_cpu_init_error_is_not_terminal_and_next_accepted_run_succeeds() {
+    let builds = Arc::new(AtomicUsize::new(0));
+    let count = builds.clone();
+    let b = Arc::new(MemoryBackend::default());
+    let cfg = WorkerConfig {
+        runtime_factory: Some(Arc::new(move || {
+            if count.fetch_add(1, Ordering::SeqCst) == 0 {
+                Err(std::io::Error::other("CPU first init fixture"))
+            } else {
+                build_runtime(HostRuntimeMode::CpuOnlyPerRun)
+            }
+        })),
+        ..Default::default()
+    };
+    let mut f = Fixture::new(b.clone(), cfg, vec![]);
+    let first = f.start();
+    f.poll_until(|p| *p == PollOutcome::Applied(first));
+    assert_eq!(
+        f.state.last_result(),
+        Some(&Err(vec!["비동기 런타임 초기화에 실패했습니다.".into()]))
+    );
+    assert_eq!(b.tcp_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        f.coordinator.as_ref().unwrap().lifecycle(),
+        HostLifecycle::Accepting
+    );
+    let next = f.start();
+    assert_ne!(next, first);
+    f.poll_until(|p| *p == PollOutcome::Applied(next));
+    assert!(f.state.last_result().unwrap().is_ok());
+    assert_eq!(builds.load(Ordering::SeqCst), 2);
+    assert_eq!(b.tcp_calls.load(Ordering::SeqCst), 1);
+    f.close();
+    assert_eq!(
+        f.coordinator.as_ref().unwrap().lifecycle(),
+        HostLifecycle::Closed
+    );
+}
+#[test]
+fn parent_native_pending_same_arc_full_result_and_runtime_drop_are_one_observed_sequence() {
+    let gate = Arc::new(Gate::default());
+    let b = Arc::new(MemoryBackend {
+        gate: Some(gate.clone()),
+        ..Default::default()
+    });
+    let dropped = Arc::new(AtomicBool::new(false));
+    let witness = dropped.clone();
+    let (mut cfg, observed) = capture();
+    cfg.on_runtime_drop = Some(Arc::new(move || witness.store(true, Ordering::SeqCst)));
+    let mut f = Fixture::new_native(b.clone(), cfg, vec![gate.clone()]);
+    f.state.replace_targets("127.0.0.1:80\n[::1]:81").unwrap();
+    f.state
+        .set_options(QuickOptions {
+            concurrency: 1,
+            selected_features: vec![
+                QuickFeature::TcpConnect,
+                QuickFeature::IcmpPing,
+                QuickFeature::LocalNetwork,
+            ],
+            ..Default::default()
+        })
+        .unwrap();
+    let id = f.start();
+    let snapshot = f.state.active_snapshot().unwrap().clone();
+    until(|| gate.entered.load(Ordering::SeqCst));
+    let cancel = f
+        .coordinator
+        .as_ref()
+        .unwrap()
+        .inflight
+        .as_ref()
+        .unwrap()
+        .cancel
+        .clone();
+    assert!(!cancel.load(Ordering::SeqCst));
+    assert!(Arc::ptr_eq(
+        &cancel,
+        b.cancel.lock().unwrap().as_ref().unwrap()
+    ));
+    let c = f.coordinator.as_mut().unwrap();
+    c.begin_close(&mut f.state).unwrap();
+    assert!(cancel.load(Ordering::SeqCst));
+    assert_eq!(c.poll(&mut f.state), PollOutcome::Idle);
+    assert!(observed.lock().unwrap().is_none());
+    assert!(!dropped.load(Ordering::SeqCst));
+    assert!(!c.is_shutdown_complete());
+    gate.release();
+    f.poll_until(|p| *p == PollOutcome::Applied(id));
+    assert_eq!(f.state.last_result(), observed.lock().unwrap().as_ref());
+    assert!(f.state.last_result().unwrap().as_ref().unwrap().cancelled);
+    assert_eq!(b.tcp_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(b.icmp_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(b.host_calls.load(Ordering::SeqCst), 0);
+    f.close();
+    assert!(dropped.load(Ordering::SeqCst));
+    let c = f.coordinator.as_ref().unwrap();
+    assert_eq!(c.completed_snapshot(), Some(&snapshot));
+    assert!(c.is_shutdown_complete());
+    assert_eq!(c.lifecycle(), HostLifecycle::Closed);
 }

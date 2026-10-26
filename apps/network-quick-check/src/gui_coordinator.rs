@@ -14,7 +14,23 @@ type RunResult = Result<QuickRunReport, Vec<String>>;
 const EXIT_PENDING: u8 = 0;
 const EXIT_NORMAL: u8 = 1;
 const EXIT_PANICKED: u8 = 2;
+const EXIT_RUNTIME_FAILED: u8 = 3;
 const LOST_COMPLETION: &str = "진단 호스트의 완료 전달이 유실되었습니다.";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HostRuntimeMode {
+    CpuOnlyPerRun,
+    NativeIoOnce,
+}
+
+pub(crate) fn build_runtime(mode: HostRuntimeMode) -> std::io::Result<tokio::runtime::Runtime> {
+    let mut builder = tokio::runtime::Builder::new_current_thread();
+    if mode == HostRuntimeMode::NativeIoOnce {
+        builder.enable_io();
+        builder.enable_time();
+    }
+    builder.build()
+}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum HostInitError {
     ThreadSpawnFailed,
@@ -79,6 +95,7 @@ struct StartCommand {
     cancel: Arc<AtomicBool>,
 }
 struct Completion {
+    terminal_host_failure: bool,
     id: RunId,
     result: RunResult,
 }
@@ -104,6 +121,8 @@ struct WorkerConfig {
     #[cfg(test)]
     before_run: Option<Hook>,
     #[cfg(test)]
+    on_worker_idle: Option<Hook>,
+    #[cfg(test)]
     after_send: Option<Hook>,
     #[cfg(test)]
     before_exit: Option<Hook>,
@@ -113,8 +132,11 @@ struct WorkerConfig {
     on_result: Option<ResultHook>,
     #[cfg(test)]
     omit_completion_after_accept: bool,
+    #[cfg(test)]
+    on_runtime_drop: Option<Hook>,
 }
 pub(crate) struct GuiRunCoordinator {
+    runtime_mode: HostRuntimeMode,
     start_tx: Option<SyncSender<StartCommand>>,
     completion_rx: Option<Receiver<Completion>>,
     worker: Option<JoinHandle<()>>,
@@ -128,13 +150,42 @@ pub(crate) struct GuiRunCoordinator {
 }
 impl GuiRunCoordinator {
     pub(crate) fn spawn(backend: Arc<dyn QuickProbeBackend>) -> Result<Self, HostInitError> {
-        Self::spawn_with(backend, WorkerConfig::default(), |job| {
-            thread::Builder::new()
-                .name("quick-gui-runner".into())
-                .spawn(job)
-        })
+        Self::spawn_with_mode(
+            HostRuntimeMode::CpuOnlyPerRun,
+            backend,
+            WorkerConfig::default(),
+            |job| {
+                thread::Builder::new()
+                    .name("quick-gui-runner".into())
+                    .spawn(job)
+            },
+        )
     }
+    pub(crate) fn spawn_native(backend: Arc<dyn QuickProbeBackend>) -> Result<Self, HostInitError> {
+        Self::spawn_with_mode(
+            HostRuntimeMode::NativeIoOnce,
+            backend,
+            WorkerConfig::default(),
+            |job| {
+                thread::Builder::new()
+                    .name("quick-gui-runner-native".into())
+                    .spawn(job)
+            },
+        )
+    }
+    #[cfg(test)]
     fn spawn_with<F>(
+        backend: Arc<dyn QuickProbeBackend>,
+        config: WorkerConfig,
+        spawn: F,
+    ) -> Result<Self, HostInitError>
+    where
+        F: FnOnce(Box<dyn FnOnce() + Send>) -> std::io::Result<JoinHandle<()>>,
+    {
+        Self::spawn_with_mode(HostRuntimeMode::CpuOnlyPerRun, backend, config, spawn)
+    }
+    fn spawn_with_mode<F>(
+        mode: HostRuntimeMode,
         backend: Arc<dyn QuickProbeBackend>,
         config: WorkerConfig,
         spawn: F,
@@ -148,18 +199,21 @@ impl GuiRunCoordinator {
         let exit = Arc::clone(&worker_exit);
         let job = Box::new(move || {
             // backend/config의 destructor도 catch 경계 안이다. 전역 hook 변경/원시 payload 반사는 없다.
-            match catch_unwind(AssertUnwindSafe(move || {
-                worker_loop(backend, config, start_rx, completion_tx)
+            let code = match catch_unwind(AssertUnwindSafe(move || {
+                worker_loop(mode, backend, config, start_rx, completion_tx)
             })) {
-                Ok(()) => exit.store(EXIT_NORMAL, Ordering::SeqCst),
+                Ok(code) => code,
                 Err(payload) => {
                     exit.store(EXIT_PANICKED, Ordering::SeqCst);
                     drop(payload);
+                    return;
                 }
-            }
+            };
+            exit.store(code, Ordering::SeqCst);
         });
         let worker = spawn(job).map_err(|_| HostInitError::ThreadSpawnFailed)?;
         Ok(Self {
+            runtime_mode: mode,
             start_tx: Some(start_tx),
             completion_rx: Some(completion_rx),
             worker: Some(worker),
@@ -275,6 +329,11 @@ impl GuiRunCoordinator {
         if self.inflight.as_ref().map(|a| a.snapshot.run_id()) != Some(completion.id) {
             return PollOutcome::Stale(completion.id);
         }
+        // 고정 native 초기화 실패는 thread 정리 전에도 신규 수락을 닫는다.
+        // 일반 Core Err/CPU 초기화 Err와 구별하며 원문 결과는 그대로 적용한다.
+        if completion.terminal_host_failure {
+            self.fail();
+        }
         self.apply(state, completion.result)
     }
     fn observe_worker_exit(&mut self) {
@@ -360,11 +419,18 @@ impl GuiRunCoordinator {
     }
 }
 fn worker_loop(
+    mode: HostRuntimeMode,
     backend: Arc<dyn QuickProbeBackend>,
     config: WorkerConfig,
     start_rx: Receiver<StartCommand>,
     completion_tx: SyncSender<Completion>,
-) {
+) -> u8 {
+    let mut native_runtime: Option<tokio::runtime::Runtime> = None;
+    let mut exit_code = EXIT_NORMAL;
+    #[cfg(test)]
+    if let Some(hook) = &config.on_worker_idle {
+        hook();
+    }
     while let Ok(cmd) = start_rx.recv() {
         #[cfg(test)]
         if let Some(hook) = &config.before_run {
@@ -374,32 +440,83 @@ fn worker_loop(
         if config.omit_completion_after_accept {
             break;
         }
-        #[cfg(test)]
-        let runtime = if let Some(factory) = &config.runtime_factory {
-            factory()
-        } else {
-            tokio::runtime::Builder::new_current_thread().build()
-        };
-        #[cfg(not(test))]
-        let runtime = tokio::runtime::Builder::new_current_thread().build();
-        let result = match runtime {
-            Ok(runtime) => {
-                let result = runtime.block_on(run_quick(
+        let (result, should_continue) = match mode {
+            HostRuntimeMode::CpuOnlyPerRun => {
+                #[cfg(test)]
+                let runtime = if let Some(factory) = &config.runtime_factory {
+                    factory()
+                } else {
+                    build_runtime(mode)
+                };
+                #[cfg(not(test))]
+                let runtime = build_runtime(mode);
+                let res = match runtime {
+                    Ok(runtime) => {
+                        let res = runtime.block_on(run_quick(
+                            cmd.snapshot.request(),
+                            Arc::clone(&backend),
+                            Arc::clone(&cmd.cancel),
+                        ));
+                        drop(runtime);
+                        #[cfg(test)]
+                        if let Some(hook) = &config.on_runtime_drop {
+                            hook();
+                        }
+                        res
+                    }
+                    Err(_) => Err(vec!["비동기 런타임 초기화에 실패했습니다.".into()]),
+                };
+                (res, true)
+            }
+            HostRuntimeMode::NativeIoOnce => {
+                if native_runtime.is_none() {
+                    #[cfg(test)]
+                    let created = if let Some(factory) = &config.runtime_factory {
+                        factory()
+                    } else {
+                        build_runtime(mode)
+                    };
+                    #[cfg(not(test))]
+                    let created = build_runtime(mode);
+                    match created {
+                        Ok(runtime) => {
+                            native_runtime = Some(runtime);
+                        }
+                        Err(_) => {
+                            exit_code = EXIT_RUNTIME_FAILED;
+                            let res = Err(vec!["비동기 런타임 초기화에 실패했습니다.".into()]);
+                            #[cfg(test)]
+                            if let Some(hook) = &config.on_result {
+                                hook(&res);
+                            }
+                            let _ = completion_tx.send(Completion {
+                                terminal_host_failure: true,
+                                id: cmd.snapshot.run_id(),
+                                result: res,
+                            });
+                            break;
+                        }
+                    }
+                }
+                let runtime = native_runtime.as_ref().unwrap();
+                let res = runtime.block_on(run_quick(
                     cmd.snapshot.request(),
                     Arc::clone(&backend),
                     Arc::clone(&cmd.cancel),
                 ));
-                drop(runtime);
-                result
+                (res, true)
             }
-            Err(_) => Err(vec!["비동기 런타임 초기화에 실패했습니다.".into()]),
         };
+        if !should_continue {
+            break;
+        }
         #[cfg(test)]
         if let Some(hook) = &config.on_result {
             hook(&result);
         }
         if completion_tx
             .send(Completion {
+                terminal_host_failure: false,
                 id: cmd.snapshot.run_id(),
                 result,
             })
@@ -413,10 +530,18 @@ fn worker_loop(
         }
     }
     #[cfg(test)]
+    let had_runtime = native_runtime.is_some();
+    drop(native_runtime);
+    #[cfg(test)]
+    if had_runtime && let Some(hook) = &config.on_runtime_drop {
+        hook();
+    }
+    #[cfg(test)]
     if let Some(hook) = &config.before_exit {
         hook();
     }
     // backend/config를 포함한 소유 값은 바깥 catch_unwind 안에서 해제된다.
+    exit_code
 }
 impl Drop for GuiRunCoordinator {
     fn drop(&mut self) {
