@@ -29,6 +29,8 @@ use std::io::Write;
 use std::path::PathBuf;
 
 mod diagnostic_cli;
+#[cfg(test)]
+mod gui_coordinator;
 mod gui_entry;
 mod gui_presenter;
 pub mod gui_state;
