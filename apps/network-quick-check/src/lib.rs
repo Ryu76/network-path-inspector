@@ -36,6 +36,8 @@ mod gui_presenter;
 pub mod gui_state;
 #[cfg(windows)]
 mod native_gui;
+pub mod result_export;
+pub mod result_view;
 
 /// 인자 없이 실행되었을 때 stderr에 출력하는 정적 메시지.
 pub const NOARGS_STDERR: &str = "Network Quick Check: 진단 실행 진입점은 아직 제공하지 않습니다.\n";
