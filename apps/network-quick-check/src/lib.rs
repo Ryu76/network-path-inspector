@@ -29,7 +29,11 @@ use std::io::Write;
 use std::path::PathBuf;
 
 mod diagnostic_cli;
+mod gui_entry;
+mod gui_presenter;
 pub mod gui_state;
+#[cfg(windows)]
+mod native_gui;
 
 /// 인자 없이 실행되었을 때 stderr에 출력하는 정적 메시지.
 pub const NOARGS_STDERR: &str = "Network Quick Check: 진단 실행 진입점은 아직 제공하지 않습니다.\n";
@@ -202,7 +206,8 @@ where
 ///
 /// - 명시 개발용 단일 대상 TCP 진입점(`--dev-tcp-once-v1`)인 경우 `diagnostic_cli::try_entry`로
 ///   선행 분기하여 실행합니다.
-/// - 해당 selector가 아닌 경우 기존의 레거시 worker/idle/help 진입 로직인 `entry_with_worker`로
+/// - 입력·계획 GUI selector는 별도의 GUI 분기로만 실행하며 실제 진단을 시작하지 않습니다.
+/// - 그 밖의 경우 기존의 레거시 worker/idle/help 진입 로직인 `entry_with_worker`로
 ///   정확히 위임합니다.
 /// - `0`: 인자 없는 진입 성공, `--help` 출력 성공, worker 결과 출력 성공, 또는 유효 진단 보고서 출력 완료.
 /// - `1`: stdout 또는 stderr 쓰기/플러시 실패, 결과 상한 초과, 로컬 오류 등 I/O 오류.
@@ -210,6 +215,9 @@ where
 /// - `3`: 오류 없이 진단 실행이 취소되고 취소 보고서 출력이 완료됨.
 pub fn entry(args: &[OsString], stdout: &mut dyn Write, stderr: &mut dyn Write) -> u8 {
     if let Some(code) = diagnostic_cli::try_entry(args, stdout, stderr) {
+        return code;
+    }
+    if let Some(code) = gui_entry::try_entry(args, stderr) {
         return code;
     }
     entry_with_worker(
