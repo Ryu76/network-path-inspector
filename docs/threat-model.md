@@ -3,13 +3,13 @@
 - 문서 버전: 1.1.0-g0
 - 기준 PRD: `PRD.md` (버전 1.1.0)
 - 기준 인터페이스 계약: `contracts/g1-interface-contract.json` (`contract_version: "g1-1.1.0"`)
-- 상태: G0 위협 분석 및 통제 설계 확정 (런타임 검증은 G1~G8 단계별 게이트에서 수행)
+- 상태: G0 위협 분석 및 완화 통제 설계 목표 정의 (현재 컴파일된 코어/런타임은 없으며 G1 미통과 상태임; 런타임 검증은 G1~G8 단계별 게이트에서 수행 예정)
 
 ---
 
 ## 1. 위협 모델링 범위 및 신뢰 경계 (Trust Boundaries)
 
-NPI는 사내망/폐쇄망의 클라이언트 PC와 서버 구간에서 네트워크 경로 장애를 진단하고 제3자(방화벽 운영 업체 등)에게 제출할 증빙 번들을 생성·병합하는 도구이다. 따라서 다음과 같은 4가지 핵심 신뢰 경계를 가진다.
+NPI는 사내망/폐쇄망의 클라이언트 PC와 서버 구간에서 네트워크 경로 장애를 진단하고 제3자(방화벽 운영 업체 등)에게 제출할 증빙 번들을 생성·병합하도록 설계되는 도구이다. 따라서 다음과 같은 4가지 핵심 신뢰 경계를 가진다.
 
 ```mermaid
 flowchart LR
@@ -56,12 +56,12 @@ flowchart LR
 
 ---
 
-## 3. 주요 위협 분석 및 완화 통제 (STRIDE 기반)
+## 3. 주요 위협 분석 및 완화 통제 설계 목표 (STRIDE 기반)
 
 ### 3.1 결과 ZIP 번들 가져오기 (`import_bundle`) 보안 위협
-오프라인 양방향 진단(`paired_offline`) 시 외부 호스트에서 전달받은 ZIP 파일은 **완전한 비신뢰 입력(Untrusted Input)** 으로 취급해야 한다.
+오프라인 양방향 진단(`paired_offline`) 시 외부 호스트에서 전달받은 ZIP 파일은 **완전한 비신뢰 입력(Untrusted Input)** 으로 취급하도록 설계한다.
 
-| 위협 ID | 위협 유형 | 공격 시나리오 및 위험 | 필수 설계 통제 (Mitigations) | 관련 게이트 |
+| 위협 ID | 위협 유형 | 공격 시나리오 및 위험 | 필수 설계 통제 목표 (Planned Mitigations) | 관련 게이트 |
 |---|---|---|---|---|
 | **TM-ZIP-01** | **경로 조작 (Zip Slip / Path Traversal)** | ZIP 엔트리 이름에 `../`, `..\`, 절대 경로(`/etc/...`, `C:\...`), 드라이브 문자, 또는 Windows UNC 경로(`\\server\share`)를 포함하여 작업 디렉터리 외부에 임의 파일을 덮어씀. | 엔트리 경로 정규화 후 상대 안전 경로(`artifact_path: relative safe path`)만 허용. `..` 세그먼트, 루트/드라이브 접두사, 백슬래시 제어 시 즉시 전체 가져오기 거부(`ERROR`). | G1, G5, G6 |
 | **TM-ZIP-02** | **심볼릭 링크 및 재분석 지점 (Symlink / Reparse Point)** | ZIP 내부에 심볼릭 링크 또는 Windows 정션(junction) 엔트리를 포함시킨 뒤 후속 엔트리를 통해 민감한 시스템 파일을 읽거나 덮어씀. | ZIP 헤더 속성에서 심볼릭 링크/특수 파일 플래그 감지 시 즉시 차단. 파일 추출 시에도 OS 수준에서 재분석 지점 따라가기(follow symlink) 금지. | G5, G6 |
@@ -75,7 +75,7 @@ flowchart LR
 
 ### 3.2 진단 정확성 왜곡 및 증거 오염 위협
 
-| 위협 ID | 위협 유형 | 공격/오류 시나리오 | 필수 설계 통제 (Mitigations) | 관련 게이트 |
+| 위협 ID | 위협 유형 | 공격/오류 시나리오 | 필수 설계 통제 목표 (Planned Mitigations) | 관련 게이트 |
 |---|---|---|---|---|
 | **TM-ACC-01** | **증거 없는 확정 판정 (False OBSERVED)** | 캡처를 켜지 않은 상태에서 소켓 `REFUSED(10061)`나 `TIMED_OUT(10060)`만으로 "SYN 송신 확인", "서버가 RST 전송", "방화벽이 차단"이라고 보고서에 출력하여 분쟁 유발. | `contracts/g1-interface-contract.json` 안전 규칙 강제: `SOCKET` 증거만으로는 소켓 호출 결과만 `OBSERVED`로 기록 가능. 와이어 패킷(`SYN`/`RST`) 관찰 진술은 반드시 실제 `PACKET` 종류의 `Evidence`가 존재할 때만 허용. | G1, G2, G4 |
 | **TM-ACC-02** | **마지막 응답 HOP = 차단 장비 오판** | ICMP/TCP Traceroute가 특정 HOP 이후 응답하지 않을 때 해당 라우터/방화벽을 차단 장비로 지목함. | 모든 미응답 구간은 `UNKNOWN`으로 분류하고, "ICMP/TCP TTL 만료 응답 비활성화 또는 경로상 필터링 가능성"을 `limitations[]`에 명시. 자동 차단 지점 확정 문구 생성 금지(P0-11). | G1, G3 |
@@ -85,38 +85,39 @@ flowchart LR
 
 ---
 
-### 3.3 개인정보·내부망 정보 노출 및 권한/운영 위협
+### 3.3 개인정보·내부망 정보 노출, 권한/운영 및 개발 실행기 경계 위협
 
-| 위협 ID | 위협 유형 | 공격/오류 시나리오 | 필수 설계 통제 (Mitigations) | 관련 게이트 |
+| 위협 ID | 위협 유형 | 공격/오류 시나리오 | 필수 설계 및 운영 통제 (Planned Mitigations & Workflow Controls) | 관련 게이트 |
 |---|---|---|---|---|
 | **TM-PRV-01** | **보고서 반출 시 내부망 정보 노출 및 허위 익명성 맹신** | 업체 제출용 PDF/ZIP에 내부 서버 IP, 호스트명, 패킷 페이로드가 그대로 노출되거나, 반대로 사용자가 "마스킹 기능"만 믿고 원본 PCAP까지 완전 익명화된 것으로 오해함. | 1) **기본 보고서 마스킹 ON** (IP/호스트명/민감 페이로드 마스킹 기본 활성화), 2) 원본 증거(PCAPNG, 원본 로그)는 로컬 비공개 저장소에 유지하되 외부 ZIP 반출 시 **개인정보·내부망 정보 노출에 대한 명시적 경고 및 사용자 확인** 필수, 3) **허위 익명성 보장(False Anonymity Guarantee) 금지**: 마스킹을 켜더라도 패킷 타이밍·길이·헤더 특성 및 원본 PCAP 반출 시 내부 정보가 식별될 수 있음을 경고문에 명시(ADR-0006). | G0, G6 |
-| **TM-PRV-02** | **자격증명 수집 및 DB 프로토콜 침해** | 사용자가 대상 입력란에 `oracle://user:pass@host:1526/sid` 형태를 입력하여 계정/비밀번호가 로그와 보고서에 남거나, 도구가 DB 로그인을 시도해 계정 잠금을 유발함. | 1) `Target.host` 검증기에서 URI 스킴(`://`), 경로(`/`), 자격증명(`@`, `:`), 공백, CIDR(`/`), 쉼표 목록을 원천 거부, 2) DB 계정·비밀번호 입력 UI 및 저장 필드 일절 없음, 3) 오직 TCP 3-way 핸드셰이크 수준까지만 검사(P0-13). | G1, G2 |
-| **TM-OPS-01** | **무단 대역 스캔 및 운영망 과부하** | 도구가 서브넷 전체를 스캔하거나 과도한 동시 연결·무한 재시도로 방화벽 세션 테이블이나 서버를 고갈시킴. | 단일 목적지(` max_concurrent_dest = 1`), 동시 TCP 프로브 최대 4개(`max_concurrent_tcp = 4`), 최대 30 HOP(`max_hops = 30`), 기본 재시도 0회(상한 3회, 지터/백오프 필수), 캡처 최대 30초/50 MiB 제한. | G1, G2, G3 |
-| **TM-OPS-02** | **프로파일 복원 시 고위험/캡처 기능 자동 실행** | 이전에 캡처를 승인했거나 고부하 기능(`packet_capture`, `tcp_traceroute`)을 켰던 프로파일을 복원할 때 사용자 인지 없이 즉시 패킷 캡처나 고비용 프로브가 활성화됨. | 프로파일 복원 시 `capture_approved`를 무조건 `false`로 강제 박탈(strip)하고, `cost_class == "HIGH"` 또는 `permission_level == "CONDITIONAL"` 기능은 체크 해제하거나 실행 전 명시적 재확인(reconfirmation)을 거치도록 강제(ADR-0004). | G1, G2, G4 |
+| **TM-PRV-02** | **자격증명 수집 및 DB 프로토콜 침해** | 사용자가 대상 입력란에 `oracle://user:pass@host:1526/sid` 형태를 입력하여 계정/비밀번호가 로그와 보고서에 남거나, 도구가 DB 로그인을 시도해 계정 잠금을 유발함. | 1) `Target.host` 검증기에서 URI 스킴(`://`), 경로(`/`), 자격증명(`@`, `:`), 공백, CIDR(`/`), 쉼표 목록을 거부하도록 설계(G1 검증 예정), 2) DB 계정·비밀번호 입력 UI 및 저장 필드 일절 없음, 3) 오직 TCP 3-way 핸드셰이크 수준까지만 검사(P0-13). | G1, G2 |
+| **TM-OPS-01** | **무단 대역 스캔 및 운영망 과부하** | 도구가 서브넷 전체를 스캔하거나 과도한 동시 연결·무한 재시도로 방화벽 세션 테이블이나 서버를 고갈시킴. | 단일 목적지(`max_concurrent_dest = 1`), 동시 TCP 프로브 최대 4개(`max_concurrent_tcp = 4`), 최대 30 HOP(`max_hops = 30`), 기본 재시도 0회(상한 3회, 지터/백오프 필수), 캡처 최대 30초/50 MiB 제한. | G1, G2, G3 |
+| **TM-OPS-02** | **프로파일 복원 시 고위험/캡처 기능 자동 실행** | 이전에 캡처를 승인했거나 고부하 기능(`packet_capture`, `tcp_traceroute`)을 켰던 프로파일을 복원할 때 사용자 인지 없이 즉시 패킷 캡처나 고비용 프로브가 활성화됨. | 프로파일 복원 시 `capture_approved`를 무조건 `false`로 강제 박탈(strip)하고, `cost_class == "HIGH"` 또는 `permission_level == "CONDITIONAL"` 기능은 체크 해제하거나 실행 전 명시적 재확인(reconfirmation)을 거치도록 설계(ADR-0004). | G1, G2, G4 |
 | **TM-SYS-01** | **권한 상승, 드라이버 설치 및 OS 설정 변경** | 도구가 스스로 UAC 관리자 권한 상승을 시도하거나, Npcap 무인 설치(`/S`), 방화벽 규칙 추가, 라우팅 변경을 수행함. | 기본 실행은 일반 사용자(`USER`) 권한 고정. 관리자 권한이나 Npcap이 필요한 기능은 현재 상태를 읽기 전용으로만 확인하고 부족 시 `UNAVAILABLE` 및 안내 메시지만 표시. OS 설정 변경 코드 작성 및 실행 절대 금지. | G0~G8 전체 |
 | **TM-NET-01** | **인바운드 리스닝 포트 및 클라우드 유출** | 진단 도구나 Agent가 서버에 새로운 인바운드 관리 포트를 열어 공격 표면(Attack Surface)을 만들거나, 진단 결과를 외부 클라우드로 자동 전송함. | 인바운드 리스닝 소켓 생성 금지, 내장 웹서버 금지, 외부 텔레메트리/자동 업로드 금지. 양방향 진단은 오프라인 ZIP 파일 병합(`paired_offline`)으로만 수행. | G0, G5 |
+| **TM-EXEC-01** | **개발 에이전트 CLI 실행기 권한 및 격리 경계 오인** | 개발 자동화 CLI 실행 시 상속된 전역 권한 모드로 인해 워크플로 제약을 OS 커널 수준의 강제 샌드박스로 오인하거나 허용 경로 외부에 운영 변경을 유발함. | 1) 실제 실행기 관찰 사실 기록: CLI 실행 시 상속된 `permission_mode=always-proceed`가 관찰되었으며 부모는 전역 승인 설정(global grants)을 변경하지 않음. `--sandbox` 플래그는 유지되었으나, `FILE-ONLY` 프롬프트 제약·격리 git `worktree`·사후 도구/경로 감사(post-tool/path audit)는 **워크플로 수준 검사(workflow checks)** 이며 **검증된 OS 수준의 파일시스템/네트워크 강제 격리(proven OS-level containment)가 아님**.<br>2) 실제 G0-1(`g01`) 실행에서 검증·사용된 CLI 도구는 `read_file` 및 `write_file`뿐이며, 프로젝트 범위 외부의 운영 환경 변경 및 외부 네트워크 접속은 엄격히 금지함. | G0 (개발 하네스 거버넌스) |
 
 ---
 
-## 4. 로컬 증거 보존 및 수명주기 보안
+## 4. 로컬 증거 보존 및 수명주기 보안 설계 목표
 
 1. **원자적 저장 및 충돌 방지**:
-   - 모든 세션은 고유 UUID(`session_id`)를 부여받으며, 파일 기록 시 `<target>.tmp.<uuid>`에 먼저 기록하고 fsync 후 원자적 이름 변경을 수행한다.
+   - 모든 세션은 고유 UUID(`session_id`)를 부여받으며, 파일 기록 시 `<target>.tmp.<uuid>`에 먼저 기록하고 fsync 후 원자적 이름 변경을 수행하도록 설계한다.
    - 기존 원본 캡처 파일이나 세션 결과를 덮어쓰지 않는다(PRD 13.1절).
-2. **작업 취소 및 비정상 종료 시 안전한 해제**:
-   - 사용자가 진단을 중지하거나 타임아웃·용량 상한(50 MiB) 도달, 앱 종료, 시스템 절전 진입 시 모든 백그라운드 Tokio 태스크와 Npcap 캡처 핸들을 3초 이내에 해제(목표 예산)하고, 그때까지 수집된 부분 결과는 `CANCELLED` 상태로 보존한다.
+2. **작업 취소 및 비정상 종료 시 안전한 해제 목표**:
+   - 사용자가 진단을 중지하거나 타임아웃·용량 상한(50 MiB) 도달, 앱 종료, 시스템 절전 진입 시 모든 백그라운드 Tokio 태스크와 Npcap 캡처 핸들을 3초 이내에 해제(목표 예산)하고, 그때까지 수집된 부분 결과는 `CANCELLED` 상태로 보존하도록 설계한다.
 3. **보관 주기와 사용자 삭제 권한**:
-   - 로컬 이력 및 로그 기본 보관 기간은 30일(`log_retention_days: 30`)이며, 사용자가 언제든지 개별 세션 및 원본 PCAP 파일을 영구 삭제할 수 있는 인터페이스를 제공한다.
+   - 로컬 이력 및 로그 기본 보관 기간은 30일(`log_retention_days: 30`)이며, 사용자가 언제든지 개별 세션 및 원본 PCAP 파일을 영구 삭제할 수 있는 인터페이스를 제공하도록 설계한다.
 
 ---
 
 ## 5. 출처 사실 vs 설계 선택 vs 미검증 구분 요약
 
 - **출처 사실 (Source Facts)**:
-  - Npcap 무료/데모 버전은 재배포 및 무인 설치(`/S`)를 제공하지 않으며, Windows에서 다중 Npcap 커널 필터 드라이버 인스턴스 로드는 성능 저하와 필터 슬롯 고갈을 유발한다(`.harness/references/npcap-redistribution.txt`, `https://npcap.com/oem/redist.html`).
-  - Tauri는 CSP(Content Security Policy), Capabilities, Permissions, Asset protocol scope 등 프론트엔드-백엔드 간 권한 격리 메커니즘을 제공한다(`.harness/references/tauri-prerequisites.txt`, `https://tauri.app/start/prerequisites/`).
+  - Npcap 무료/데모 버전은 무인 설치(`/S`)를 제공하지 않으며 일반적으로 재배포를 허용하지 않고, Windows에서 다중 Npcap 커널 필터 드라이버 인스턴스 로드는 성능 저하와 필터 슬롯 고갈을 유발한다(`E:/harnes/network-path-inspector/.harness/references/npcap-redistribution.txt`, `https://npcap.com/oem/redist.html`).
+  - Tauri는 CSP(Content Security Policy), Capabilities, Permissions, Asset protocol scope 등 프론트엔드-백엔드 간 권한 격리 메커니즘을 제공한다(`E:/harnes/network-path-inspector/.harness/references/tauri-prerequisites.txt`, `https://tauri.app/start/prerequisites/`).
 - **설계 선택 (Design Choices)**:
   - 외부 ZIP 번들 가져오기(`import_bundle`)에 대해 Zip Slip, Symlink, Zip Bomb, 중복 엔트리, `SHA256SUMS.txt` 전수 대조, Unicode 정규화/이스케이프, 외부 리소스 열기 금지의 7중 방어선을 아키텍처 필수 요구사항으로 채택했다.
   - 보고서 기본 마스킹을 ON으로 설정하되, 원본 증거 반출 시 명시적 경고를 표시하고 허위 익명성 보장을 하지 않기로 결정했다.
 - **미검증 사항 (Unverified / Deferred)**:
-  - 위 ZIP 샌드박스 파서 및 마스킹 필터의 실제 코드 구현과 퍼징/결함 주입(Fault Injection) 테스트는 G1/G5/G6 단계에서 수행되어야 하며 현재(`G0`)는 설계 기준만 확정된 상태(`not-started`)이다.
+  - 위 ZIP 샌드박스 파서 및 마스킹 필터의 실제 코드 구현과 퍼징/결함 주입(Fault Injection) 테스트는 G1/G5/G6 단계에서 수행되어야 하며 현재(`G0`)는 컴파일된 코어/런타임 없이 설계 기준만 정의된 상태(`not-started`)이다.

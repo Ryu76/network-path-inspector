@@ -35,6 +35,6 @@
      - `G-EVID` (5): `result_json`, `pdf_report`, `pcap_export`, `hash_verify`, `policy_check`
    - 기타 표준 프리셋도 `contracts/g1-interface-contract.json`의 정의(`path-default` 7개, `precise-default` 11개, `paired-default` 5개)를 그대로 따른다.
 
-## 3. 결과 및 영향 (Consequences)
-- PRD 원문을 수정하지 않고도 14.1절 표, 14.5절 UI 레이아웃(`[선택 5개]`), 그리고 `contracts/g1-interface-contract.json`이 완벽히 일관성을 유지한다.
-- 모든 코어·UI·테스트 워크트리가 동일한 23개 기능 ID와 4개 프리셋 정의를 기준으로 검증된다.
+## 3. 결과 및 영향 (Consequences — 설계 목표 및 수용 검증 계획)
+- PRD 원문을 수정하지 않고도 14.1절 표, 14.5절 UI 레이아웃(`[선택 5개]`), 그리고 `contracts/g1-interface-contract.json`을 일관된 단일 계약 기준으로 정렬한다.
+- 현재 시점에는 컴파일된 코어/런타임이 없으며 G1이 아직 통과되지 않았으므로, 코어·UI·테스트 통합 시 동일한 23개 기능 ID와 4개 프리셋 정의를 G1 수용 검증 기준으로 사용할 예정이다.
