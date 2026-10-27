@@ -537,13 +537,27 @@ impl GuiPresenter {
     ///
     /// 65,536바이트 상한을 문자 경계에서 지키며 상한 도달 시 생략 고지를 추가합니다.
     pub fn render_plan_preview(&self) -> String {
-        let mut writer = SafeBoundedWriter::new(MAX_RENDER_BYTES);
+        self.render_plan_preview_for_mode(true)
+    }
 
+    /// 실행 화면의 계획 미리보기. 검사 결과와 혼동하지 않고 입력 전용 안내를 재사용하지 않는다.
+    #[cfg(test)]
+    pub(crate) fn render_execution_plan_preview(&self) -> String {
+        self.render_plan_preview_for_mode(false)
+    }
+
+    fn render_plan_preview_for_mode(&self, input_only: bool) -> String {
+        let mut writer = SafeBoundedWriter::new(MAX_RENDER_BYTES);
         writer.push_str("【Network Quick Check 진단 계획 확인】\r\n");
-        writer.push_str("모드: 입력·계획 확인 전용 (네트워크 진단 미연결 / 프로브 미실행)\r\n");
-        writer.push_str(
-            "안내: 본 화면은 실제 네트워크 연결을 수행하지 않으며 계획 수립 결과만 확인합니다.\r\n",
-        );
+        if input_only {
+            writer.push_str("모드: 입력·계획 확인 전용 (네트워크 진단 미연결 / 프로브 미실행)\r\n");
+            writer.push_str(
+                "안내: 본 화면은 실제 네트워크 연결을 수행하지 않으며 계획 수립 결과만 확인합니다.\r\n",
+            );
+        } else {
+            writer.push_str("모드: 검사 계획 미리보기 (실제 진단 결과 아님)\r\n");
+            writer.push_str("안내: 실행은 [시작]으로 요청하며, 완료 결과는 별도로 표시됩니다.\r\n");
+        }
 
         if self.is_plan_stale {
             writer.push_str(

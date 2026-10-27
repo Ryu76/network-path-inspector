@@ -115,6 +115,23 @@ impl GuiRunSession {
         &self.presenter
     }
 
+    /// 창의 활성화 상태를 위한 읽기 전용 조회. 실제 명령도 같은 보호 검사를 수행한다.
+    pub(crate) fn can_edit(&self) -> bool {
+        self.check_can_edit().is_ok()
+    }
+
+    /// 아직 적용하지 않은 입력 변경으로 계획을 stale 처리한다. 실행 중 모델 변경은 거부한다.
+    pub(crate) fn mark_plan_stale(&mut self) -> Result<(), SessionError> {
+        self.check_can_edit()?;
+        self.presenter.mark_plan_stale();
+        Ok(())
+    }
+
+    /// UI 안내 오류만 갱신한다. 실행 DTO·활성 ID·snapshot·취소 flag를 수정하지 않는다.
+    pub(crate) fn set_ui_error(&mut self, message: Option<String>) {
+        self.presenter.set_error(message);
+    }
+
     /// 가장 최근 완료된 실행의 확정 스냅샷을 참조합니다.
     ///
     /// 실행 호스트가 존재하고 완료된 스냅샷이 있을 때에만 반환합니다.

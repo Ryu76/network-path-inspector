@@ -247,6 +247,9 @@ impl Drop for Fixture {
 fn assert_locked(session: &mut GuiRunSession, error: SessionError) {
     let before = session.presenter().clone();
     let snapshot = session.completed_snapshot().cloned();
+    assert!(!session.can_edit());
+    assert_eq!(session.mark_plan_stale(), Err(error.clone()));
+    assert_eq!(session.presenter(), &before);
     assert_eq!(session.append_targets("127.0.0.1:81"), Err(error.clone()));
     assert_eq!(session.presenter(), &before);
     assert_eq!(session.replace_targets("[::1]:81"), Err(error.clone()));
@@ -1158,4 +1161,38 @@ fn fresh_never_run_closed_host_enqueue_failure_keeps_session_owner_and_presenter
         f.session.host.is_some(),
         "실패해도 원 host를 session이 소유한 채 최종 종료를 관측함"
     );
+}
+
+#[test]
+fn ui_typed_facade_marks_stale_and_bounds_errors_without_execution_mutation() {
+    let mut f = Fixture::new(valid_presenter(), vec![]);
+    let session = &mut f.session;
+    assert!(session.can_edit());
+    let old_preview = session.presenter().render_plan_preview();
+    let execution_preview = session.presenter().render_execution_plan_preview();
+    assert!(old_preview.contains("네트워크 진단 미연결"));
+    assert!(execution_preview.contains("실제 진단 결과 아님"));
+    assert!(!execution_preview.contains("네트워크 진단 미연결"));
+    assert!(execution_preview.len() <= crate::gui_presenter::MAX_RENDER_BYTES);
+    let state_before = session.presenter().state().clone();
+    session.mark_plan_stale().unwrap();
+    assert!(session.presenter().is_plan_stale());
+    assert_eq!(session.presenter().state(), &state_before);
+    let before = session.presenter().clone();
+    let message = "한글 UI 오류 ".repeat(10000);
+    let mut expected = before.clone();
+    expected.set_error(Some(message.clone()));
+    session.set_ui_error(Some(message));
+    assert_eq!(session.presenter(), &expected);
+    assert!(session.presenter().render_error().len() <= crate::gui_presenter::MAX_RENDER_BYTES);
+    assert_eq!(session.presenter().state(), &state_before);
+    assert!(session.host_lifecycle().is_none());
+    session.set_ui_error(None);
+    assert_eq!(session.presenter(), &before);
+    session.begin_close().unwrap();
+    assert!(!session.can_edit());
+    let state_before = session.presenter().state().clone();
+    session.set_ui_error(Some("종료 안내".into()));
+    assert_eq!(session.presenter().state(), &state_before);
+    assert_eq!(session.shutdown_state(), SessionShutdown::Closed);
 }
