@@ -815,3 +815,266 @@ fn test_host_adapter_details_has_exact_three_keys() {
     keys.sort();
     assert_eq!(keys, vec!["limitations", "outcome", "raw_measurement"]);
 }
+
+/// 26. ICMP 대상 IP에 앞뒤 공백이 포함된 경우 trim으로 수리하지 않고 resolved_ip를 None으로 유지하며 raw_measurement 원문을 보존하는지 검증.
+#[test]
+fn test_icmp_adapter_target_with_whitespace_keeps_resolved_ip_none_and_preserves_raw() {
+    let ctx = create_synthetic_context("127.0.0.1", 80);
+    let measurement = IcmpMeasurement {
+        target: " 127.0.0.1 ".to_string(),
+        outcome: "REPLY".to_string(),
+        elapsed_ms: 5,
+        ip_status: Some(0),
+        error_code: None,
+        rtt_ms: Some(2),
+        ttl: Some(64),
+        limitations: vec![],
+    };
+
+    let res = icmp_to_quick_result(&ctx, &measurement).expect("변환 성공");
+    // 측정 원문이 trim 없이 파싱되므로 공백 포함 IP는 parse::<IpAddr>() 실패 -> resolved_ip는 None이어야 함
+    assert_eq!(
+        res.resolved_ip, None,
+        "공백이 포함된 IP는 trim 수리 없이 resolved_ip가 None이어야 함"
+    );
+    assert_eq!(res.status, QuickStatus::PASS);
+    assert_eq!(res.evidence_level, EvidenceLevel::OBSERVED);
+    // raw_measurement 원문 공백 보존 검증
+    assert_eq!(
+        res.details["raw_measurement"]["target"], " 127.0.0.1 ",
+        "raw_measurement에는 공백이 포함된 원문 target이 그대로 보존되어야 함"
+    );
+}
+
+/// 27. Host selected_route target이 'not-an-ip'인 경우 완전 PASS 불가, 유효 empty array 시 PARTIAL WARN, 전부 불량 시 UNKNOWN 및 target.invalid 한계 포함 검증.
+#[test]
+fn test_host_adapter_non_ip_target_never_pass_partial_warn_or_unknown() {
+    let ctx = create_synthetic_context("192.168.1.1", 443);
+
+    // 케이스 A: 유효한 empty array (adapters: [], routes: []) + 잘못된 selected_route target -> PARTIAL (WARN)
+    let snapshot_empty_arrays = HostSnapshot {
+        adapters: serde_json::to_value(Vec::<AdapterEntry>::new()).expect("adapters"),
+        routes: serde_json::to_value(Vec::<RouteEntry>::new()).expect("routes"),
+        selected_route: serde_json::to_value(create_synthetic_selected_route_entry(
+            "not-an-ip",
+            false,
+        ))
+        .expect("selected_route"),
+        errors: vec![],
+        limitations: vec![],
+    };
+
+    let res_a = host_to_quick_result(&ctx, &snapshot_empty_arrays, Some(10)).expect("변환 성공");
+    assert_ne!(
+        res_a.status,
+        QuickStatus::PASS,
+        "잘못된 target은 절대 PASS가 될 수 없음"
+    );
+    assert_eq!(
+        res_a.status,
+        QuickStatus::WARN,
+        "유효한 빈 배열이 존재하므로 PARTIAL WARN이어야 함"
+    );
+    assert_eq!(res_a.evidence_level, EvidenceLevel::OBSERVED);
+    assert_eq!(res_a.details["outcome"], "PARTIAL");
+    assert_eq!(
+        res_a.resolved_ip, None,
+        "잘못된 target에서 resolved_ip를 발명하지 않아야 함"
+    );
+    assert_eq!(
+        res_a.details["raw_measurement"]["selected_route"]["target"], "not-an-ip",
+        "raw_measurement에 원본 target 문자열이 보존되어야 함"
+    );
+    let lims_a = res_a.details["limitations"]
+        .as_array()
+        .expect("limitations 배열");
+    assert!(
+        lims_a
+            .iter()
+            .any(|v| v.as_str().unwrap_or("").contains("target.invalid")),
+        "limitations에 target.invalid 명시 확인"
+    );
+
+    // 케이스 B: 모든 컴포넌트 불량(null) + 잘못된 selected_route target -> UNKNOWN (UNAVAILABLE)
+    let snapshot_all_invalid = HostSnapshot {
+        adapters: serde_json::Value::Null,
+        routes: serde_json::Value::Null,
+        selected_route: serde_json::to_value(create_synthetic_selected_route_entry(
+            "not-an-ip",
+            false,
+        ))
+        .expect("selected_route"),
+        errors: vec![],
+        limitations: vec![],
+    };
+
+    let res_b = host_to_quick_result(&ctx, &snapshot_all_invalid, None).expect("변환 성공");
+    assert_eq!(
+        res_b.status,
+        QuickStatus::UNKNOWN,
+        "모든 구성요소 불량 시 UNKNOWN이어야 함"
+    );
+    assert_eq!(res_b.evidence_level, EvidenceLevel::UNKNOWN);
+    assert_eq!(res_b.details["outcome"], "UNAVAILABLE");
+    assert_eq!(res_b.resolved_ip, None);
+    assert_eq!(
+        res_b.details["raw_measurement"]["selected_route"]["target"],
+        "not-an-ip"
+    );
+    let lims_b = res_b.details["limitations"]
+        .as_array()
+        .expect("limitations 배열");
+    assert!(
+        lims_b
+            .iter()
+            .any(|v| v.as_str().unwrap_or("").contains("target.invalid")),
+        "limitations에 target.invalid 명시 확인"
+    );
+}
+
+/// 28. Host selected_route target에 앞뒤 공백이 포함된 경우 trim 수리를 거부하여 완전 PASS 불가 및 resolved_ip None 보존 검증.
+#[test]
+fn test_host_adapter_whitespace_target_never_pass_no_repair() {
+    let ctx = create_synthetic_context("192.168.1.1", 443);
+    let whitespace_target = " 192.168.1.1 ";
+
+    // 케이스 A: 유효 어댑터/라우트 존재 + 공백 포함 target -> PARTIAL (WARN)
+    let snapshot_warn = HostSnapshot {
+        adapters: serde_json::to_value(vec![create_synthetic_adapter_entry()]).expect("adapters"),
+        routes: serde_json::to_value(vec![create_synthetic_route_entry()]).expect("routes"),
+        selected_route: serde_json::to_value(create_synthetic_selected_route_entry(
+            whitespace_target,
+            false,
+        ))
+        .expect("selected_route"),
+        errors: vec![],
+        limitations: vec![],
+    };
+
+    let res_a = host_to_quick_result(&ctx, &snapshot_warn, Some(25)).expect("변환 성공");
+    assert_ne!(
+        res_a.status,
+        QuickStatus::PASS,
+        "공백 포함 target은 PASS가 될 수 없음"
+    );
+    assert_eq!(res_a.status, QuickStatus::WARN);
+    assert_eq!(res_a.evidence_level, EvidenceLevel::OBSERVED);
+    assert_eq!(res_a.details["outcome"], "PARTIAL");
+    assert_eq!(
+        res_a.resolved_ip, None,
+        "공백 포함 target을 trim 수리하여 resolved_ip로 발명하지 않아야 함"
+    );
+    assert_eq!(
+        res_a.details["raw_measurement"]["selected_route"]["target"], whitespace_target,
+        "raw_measurement에 공백 원문이 그대로 보존되어야 함"
+    );
+    let lims_a = res_a.details["limitations"]
+        .as_array()
+        .expect("limitations 배열");
+    assert!(
+        lims_a
+            .iter()
+            .any(|v| v.as_str().unwrap_or("").contains("target.invalid")),
+        "limitations에 target.invalid 명시 확인"
+    );
+
+    // 케이스 B: 모두 불량(null) + 공백 포함 target -> UNKNOWN (UNAVAILABLE)
+    let snapshot_unknown = HostSnapshot {
+        adapters: serde_json::Value::Null,
+        routes: serde_json::Value::Null,
+        selected_route: serde_json::to_value(create_synthetic_selected_route_entry(
+            whitespace_target,
+            false,
+        ))
+        .expect("selected_route"),
+        errors: vec![],
+        limitations: vec![],
+    };
+
+    let res_b = host_to_quick_result(&ctx, &snapshot_unknown, None).expect("변환 성공");
+    assert_eq!(res_b.status, QuickStatus::UNKNOWN);
+    assert_eq!(res_b.evidence_level, EvidenceLevel::UNKNOWN);
+    assert_eq!(res_b.details["outcome"], "UNAVAILABLE");
+    assert_eq!(res_b.resolved_ip, None);
+    let lims_b = res_b.details["limitations"]
+        .as_array()
+        .expect("limitations 배열");
+    assert!(
+        lims_b
+            .iter()
+            .any(|v| v.as_str().unwrap_or("").contains("target.invalid")),
+        "limitations에 target.invalid 명시 확인"
+    );
+}
+
+/// 29. Host selected_route target이 빈 문자열인 경우 완전 PASS 불가, 유효 empty array 시 PARTIAL WARN, 전부 불량 시 UNKNOWN 검증.
+#[test]
+fn test_host_adapter_empty_target_never_pass_partial_warn_or_unknown() {
+    let ctx = create_synthetic_context("192.168.1.1", 443);
+
+    // 케이스 A: 유효한 empty array (adapters: [], routes: []) + 빈 target -> PARTIAL (WARN)
+    let snapshot_empty_arrays = HostSnapshot {
+        adapters: serde_json::to_value(Vec::<AdapterEntry>::new()).expect("adapters"),
+        routes: serde_json::to_value(Vec::<RouteEntry>::new()).expect("routes"),
+        selected_route: serde_json::to_value(create_synthetic_selected_route_entry("", false))
+            .expect("selected_route"),
+        errors: vec![],
+        limitations: vec![],
+    };
+
+    let res_a = host_to_quick_result(&ctx, &snapshot_empty_arrays, Some(15)).expect("변환 성공");
+    assert_ne!(
+        res_a.status,
+        QuickStatus::PASS,
+        "빈 target은 절대 PASS가 될 수 없음"
+    );
+    assert_eq!(res_a.status, QuickStatus::WARN);
+    assert_eq!(res_a.evidence_level, EvidenceLevel::OBSERVED);
+    assert_eq!(res_a.details["outcome"], "PARTIAL");
+    assert_eq!(
+        res_a.resolved_ip, None,
+        "빈 target에서 resolved_ip를 발명하지 않아야 함"
+    );
+    assert_eq!(
+        res_a.details["raw_measurement"]["selected_route"]["target"], "",
+        "raw_measurement에 빈 문자열 원문이 보존되어야 함"
+    );
+    let lims_a = res_a.details["limitations"]
+        .as_array()
+        .expect("limitations 배열");
+    assert!(
+        lims_a
+            .iter()
+            .any(|v| v.as_str().unwrap_or("").contains("target.invalid")),
+        "limitations에 target.invalid 명시 확인"
+    );
+
+    // 케이스 B: 모든 컴포넌트 불량(null) + 빈 target -> UNKNOWN (UNAVAILABLE)
+    let snapshot_all_invalid = HostSnapshot {
+        adapters: serde_json::Value::Null,
+        routes: serde_json::Value::Null,
+        selected_route: serde_json::to_value(create_synthetic_selected_route_entry("", false))
+            .expect("selected_route"),
+        errors: vec![],
+        limitations: vec![],
+    };
+
+    let res_b = host_to_quick_result(&ctx, &snapshot_all_invalid, None).expect("변환 성공");
+    assert_eq!(res_b.status, QuickStatus::UNKNOWN);
+    assert_eq!(res_b.evidence_level, EvidenceLevel::UNKNOWN);
+    assert_eq!(res_b.details["outcome"], "UNAVAILABLE");
+    assert_eq!(res_b.resolved_ip, None);
+    assert_eq!(
+        res_b.details["raw_measurement"]["selected_route"]["target"],
+        ""
+    );
+    let lims_b = res_b.details["limitations"]
+        .as_array()
+        .expect("limitations 배열");
+    assert!(
+        lims_b
+            .iter()
+            .any(|v| v.as_str().unwrap_or("").contains("target.invalid")),
+        "limitations에 target.invalid 명시 확인"
+    );
+}
