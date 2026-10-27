@@ -1046,7 +1046,9 @@ pub fn trace_to_quick_result(
         feature: QuickFeature::IcmpTraceroute,
         status,
         elapsed_ms: Some(measurement.elapsed_ms),
-        os_error_code: measurement.exit_code,
+        // 프로세스 종료코드는 OS 오류코드가 아니다. exit_code 원문은 raw_measurement에 보존한다.
+        // 현재 DTO에 독립적으로 관측된 OS 오류코드 필드가 없으므로 미확인 null을 사용한다.
+        os_error_code: None,
         details,
         evidence_level,
     };

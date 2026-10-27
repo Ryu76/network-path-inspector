@@ -268,7 +268,8 @@ fn test_adapter_reached_to_quick_result() {
     assert_eq!(result.feature, QuickFeature::IcmpTraceroute);
     assert_eq!(result.resolved_ip.as_deref(), Some("127.0.0.1"));
     assert_eq!(result.elapsed_ms, Some(12));
-    assert_eq!(result.os_error_code, Some(0));
+    assert_eq!(result.os_error_code, None);
+    assert_eq!(result.details["raw_measurement"]["exit_code"], 0);
     assert_eq!(result.details["outcome"], "REACHED");
 }
 
