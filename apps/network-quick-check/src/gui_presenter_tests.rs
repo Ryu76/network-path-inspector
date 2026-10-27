@@ -687,3 +687,62 @@ fn parent_invalid_options_preserve_entire_protected_snapshot() {
         assert_protected_equal(&p, &before);
     }
 }
+
+#[test]
+fn input_execution_preview_share_body_legacy_line_endings_stale_and_bounded_omission() {
+    for scenario in 0..4 {
+        let mut p = GuiPresenter::new();
+        if scenario > 0 {
+            p.append_targets("127.0.0.1:49991").unwrap();
+            p.update_draft_options("3000", "1", vec![QuickFeature::TcpConnect]);
+            p.confirm_plan().unwrap();
+        }
+        if scenario == 2 {
+            p.mark_plan_stale();
+        }
+        if scenario == 3 {
+            // 렌더 상한 경계용 합성 plan이다. 네트워크 측정/유효 운영 plan의 증거가 아니다.
+            p.plan_preview.as_mut().unwrap().limitations = vec!["한글 상한 자료 ".repeat(20000)];
+        }
+        let before = p.clone();
+        let input = p.render_plan_preview();
+        let execution = p.render_execution_plan_preview();
+        assert_eq!(p, before);
+        assert!(input.starts_with("【Network Quick Check 진단 계획 확인】\r\n모드: 입력·계획 확인 전용 (네트워크 진단 미연결 / 프로브 미실행)\r\n안내: 본 화면은 실제 네트워크 연결을 수행하지 않으며 계획 수립 결과만 확인합니다.\r\n"));
+        assert!(execution.starts_with("【Network Quick Check 진단 계획 확인】\r\n모드: 검사 계획 미리보기 (실제 진단 결과 아님)\r\n안내: 실행은 [시작]으로 요청하며, 완료 결과는 별도로 표시됩니다.\r\n"));
+        for text in [&input, &execution] {
+            assert!(text.len() <= MAX_RENDER_BYTES);
+            // 원본 renderer의 제목/안내는 CRLF, 기능 제목 writeln 한 곳은 LF다.
+            // 기존 input-only 출력 보존 요구 때문에 이를 새로 정규화하지 않고 두 모드에서 특성화한다.
+            assert!(!text.contains("\r\r\n"));
+            let bytes = text.as_bytes();
+            let bare_lf = bytes
+                .iter()
+                .enumerate()
+                .filter(|(i, ch)| **ch == b'\n' && (*i == 0 || bytes[*i - 1] != b'\r'))
+                .count();
+            assert_eq!(
+                bare_lf,
+                usize::from(scenario > 0),
+                "원본 계획 줄바꿈 특성 보존"
+            );
+        }
+        let body = |s: &str| s.splitn(4, "\r\n").nth(3).unwrap().to_owned();
+        if scenario == 3 {
+            assert!(input.ends_with(TRUNCATION_NOTICE));
+            assert!(execution.ends_with(TRUNCATION_NOTICE));
+            let a = body(&input);
+            let b = body(&execution);
+            let a = a.strip_suffix(TRUNCATION_NOTICE).unwrap();
+            let b = b.strip_suffix(TRUNCATION_NOTICE).unwrap();
+            assert!(
+                a.starts_with(b) || b.starts_with(a),
+                "서로 다른 header 길이 이외 본문 동일 prefix"
+            );
+        } else {
+            assert_eq!(body(&input), body(&execution));
+            assert_eq!(input.contains("★ 안내:"), scenario == 2);
+            assert_eq!(execution.contains("★ 안내:"), scenario == 2);
+        }
+    }
+}

@@ -1196,3 +1196,101 @@ fn ui_typed_facade_marks_stale_and_bounds_errors_without_execution_mutation() {
     assert_eq!(session.presenter().state(), &state_before);
     assert_eq!(session.shutdown_state(), SessionShutdown::Closed);
 }
+
+/// UI 오류 갱신은 실행/완료 자료와 원 cancel Arc를 바꾸지 않아야 한다.
+fn assert_ui_error_preserves_execution(session: &mut GuiRunSession, flag: &Arc<AtomicBool>) {
+    let before = session.presenter().clone();
+    let active = session.presenter().state().active_snapshot().cloned();
+    let completed = session.completed_snapshot().cloned();
+    let lifecycle = session.host_lifecycle();
+    let shutdown = session.shutdown_state();
+    let closing = session.is_close_requested();
+    let flag_before = flag.load(Ordering::SeqCst);
+    let message = "실행 중 UI 안내 ".repeat(12000);
+    let mut expected = before.clone();
+    expected.set_error(Some(message.clone()));
+    session.set_ui_error(Some(message));
+    assert_eq!(session.presenter(), &expected);
+    assert_eq!(
+        session.presenter().state().active_snapshot(),
+        active.as_ref()
+    );
+    assert_eq!(session.completed_snapshot(), completed.as_ref());
+    assert_eq!(session.host_lifecycle(), lifecycle);
+    assert_eq!(session.shutdown_state(), shutdown);
+    assert_eq!(session.is_close_requested(), closing);
+    assert_eq!(flag.load(Ordering::SeqCst), flag_before);
+    assert!(session.presenter().render_error().len() <= crate::gui_presenter::MAX_RENDER_BYTES);
+    expected.set_error(None);
+    session.set_ui_error(None);
+    assert_eq!(session.presenter(), &expected);
+    assert_eq!(session.presenter().state(), before.state());
+    assert_eq!(session.completed_snapshot(), completed.as_ref());
+    assert_eq!(flag.load(Ordering::SeqCst), flag_before);
+}
+
+#[test]
+fn ui_errors_preserve_pending_cancelling_finished_report_and_closed_snapshot() {
+    for cancel_requested in [false, true] {
+        let gate = Arc::new(Gate::default());
+        let mut f = Fixture::new(valid_presenter(), vec![gate.clone()]);
+        let cleaned = f.cleaned.clone();
+        let backend = Arc::new(TestMemoryBackend {
+            gate: Some(gate.clone()),
+            ..Default::default()
+        });
+        let b = backend.clone();
+        let id = f
+            .session
+            .try_start_with(|| {
+                GuiRunCoordinator::spawn(b).map_err(|_| SessionInitError::HostSpawnFailed)
+            })
+            .unwrap();
+        until(|| gate.entered.load(Ordering::SeqCst));
+        let flag = backend.cancel_observed.lock().unwrap().clone().unwrap();
+        assert!(!flag.load(Ordering::SeqCst));
+        assert_ui_error_preserves_execution(&mut f.session, &flag);
+        assert_eq!(
+            f.session
+                .presenter()
+                .state()
+                .active_snapshot()
+                .unwrap()
+                .run_id(),
+            id
+        );
+        if cancel_requested {
+            assert_eq!(f.session.request_cancel(), Ok(Some(id)));
+            assert!(flag.load(Ordering::SeqCst));
+            assert_ui_error_preserves_execution(&mut f.session, &flag);
+            assert_eq!(f.session.request_cancel(), Ok(None));
+            assert!(flag.load(Ordering::SeqCst));
+        }
+        assert!(Arc::ptr_eq(
+            &flag,
+            backend.cancel_observed.lock().unwrap().as_ref().unwrap()
+        ));
+        gate.release();
+        until(|| f.session.poll() == PollOutcome::Applied(id));
+        assert!(f.session.presenter().state().active_snapshot().is_none());
+        assert_eq!(f.session.completed_snapshot().unwrap().run_id(), id);
+        assert!(f.session.presenter().state().last_result().is_some());
+        let report = f.session.presenter().state().last_result().cloned();
+        let snapshot = f.session.completed_snapshot().cloned();
+        assert_ui_error_preserves_execution(&mut f.session, &flag);
+        f.session.begin_close().unwrap();
+        assert_ui_error_preserves_execution(&mut f.session, &flag);
+        until(|| {
+            f.session.poll();
+            f.session.shutdown_state() == SessionShutdown::Closed
+        });
+        assert_ui_error_preserves_execution(&mut f.session, &flag);
+        assert_eq!(f.session.presenter().state().last_result(), report.as_ref());
+        assert_eq!(f.session.completed_snapshot(), snapshot.as_ref());
+        drop(f);
+        assert!(
+            cleaned.load(Ordering::SeqCst),
+            "원 session worker/channel 최종 정리 관측"
+        );
+    }
+}
