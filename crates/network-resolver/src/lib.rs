@@ -59,8 +59,10 @@ pub const LIMIT_POLL: &str = "취소/시한 확인 폴링 간격 10ms 목표이�
 pub const LIMIT_LITERAL: &str = "IP 리터럴을 부모에서 파싱: DNS 요청 없음·helper 프로세스 생성 없음; RESOLVED는 DNS 응답을 뜻하지 않음";
 pub const LIMIT_TRUNCATED: &str = "고유 주소 32개 상한으로 잘림: 나머지 주소는 미확인";
 pub const LIMIT_TIMEOUT: &str = "시한 초과로 helper를 kill+wait 정리함; 해석 결과 미확인";
-pub const LIMIT_CANCEL: &str = "취소 요청으로 helper 미생성 또는 kill+wait 정리함; 해석 결과 미확인";
-pub const LIMIT_LOCAL: &str = "로컬 입력 검증/실행/프로토콜 오류이며 이름 해석 결과로 간주하지 않음";
+pub const LIMIT_CANCEL: &str =
+    "취소 요청으로 helper 미생성 또는 kill+wait 정리함; 해석 결과 미확인";
+pub const LIMIT_LOCAL: &str =
+    "로컬 입력 검증/실행/프로토콜 오류이며 이름 해석 결과로 간주하지 않음";
 pub const LIMIT_DNS_ERROR: &str = "OS 해석기 오류 원문 코드/메시지 보존(메시지 512바이트 상한); 서버 무응답·NXDOMAIN·정책 등 원인은 추론하지 않음";
 pub const LIMIT_NO_PROCESS: &str = "helper 프로세스 생성 전 종료";
 
@@ -452,7 +454,8 @@ pub fn decode_worker_payload(
     if bytes.len() > MAX_PAYLOAD_BYTES {
         return Err("helper stdout 16KiB 상한 초과".to_string());
     }
-    let text = std::str::from_utf8(bytes).map_err(|_| "helper stdout이 UTF-8이 아님".to_string())?;
+    let text =
+        std::str::from_utf8(bytes).map_err(|_| "helper stdout이 UTF-8이 아님".to_string())?;
     let line = match text.strip_suffix('\n') {
         Some(rest) => rest.strip_suffix('\r').unwrap_or(rest),
         None => text,
@@ -460,8 +463,12 @@ pub fn decode_worker_payload(
     if line.is_empty() || line.contains('\n') || line.contains('\r') || line.trim() != line {
         return Err("helper stdout이 정확히 한 줄 JSON이 아님".to_string());
     }
-    let payload: DnsWorkerPayload = serde_json::from_str(line)
-        .map_err(|error| truncate_utf8(&format!("helper JSON 파싱 실패: {error}"), MAX_ERROR_MESSAGE_BYTES))?;
+    let payload: DnsWorkerPayload = serde_json::from_str(line).map_err(|error| {
+        truncate_utf8(
+            &format!("helper JSON 파싱 실패: {error}"),
+            MAX_ERROR_MESSAGE_BYTES,
+        )
+    })?;
     validate_worker_payload(&payload, host, port)?;
     Ok(payload)
 }
@@ -529,7 +536,9 @@ fn local_error(
     extra: &[&str],
 ) -> DnsMeasurement {
     let mut result = measurement(host, port, OUTCOME_LOCAL_ERROR, elapsed_ms, &[LIMIT_LOCAL]);
-    result.limitations.extend(extra.iter().map(|text| text.to_string()));
+    result
+        .limitations
+        .extend(extra.iter().map(|text| text.to_string()));
     result.error_code = code;
     result.error_message = Some(truncate_utf8(message, MAX_ERROR_MESSAGE_BYTES));
     result

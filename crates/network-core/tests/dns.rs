@@ -46,7 +46,7 @@ fn sample_measurement(host: &str, port: u16, outcome: &str) -> DnsMeasurement {
 }
 
 // ============================================================================
-// 1. 정상 IPv4 및 IPv6 단일 주소 해석 변환 검증
+// 1. 정상 IPv4 및 IPv6 도메인 단일 주소 해석 변환 검증
 // ============================================================================
 
 #[test]
@@ -71,7 +71,10 @@ fn test_dns_to_quick_result_ipv4_resolved_success() {
     assert_eq!(res.os_error_code, None);
 
     // lookup 단계에서는 실제 접속 전이므로 resolved_ip는 항상 null
-    assert_eq!(res.resolved_ip, None, "DNS lookup 결과의 resolved_ip는 null이어야 함");
+    assert_eq!(
+        res.resolved_ip, None,
+        "DNS lookup 결과의 resolved_ip는 null이어야 함"
+    );
 
     // details 객체 구조 및 원본 measurement 보존 검증
     let details_obj = res.details.as_object().expect("details는 객체");
@@ -109,7 +112,42 @@ fn test_dns_to_quick_result_ipv6_resolved_success() {
 }
 
 // ============================================================================
-// 2. 다중 주소 (IPv4 + IPv6 복합) 및 최대 32개 상한 보존 검증
+// 2. 정상 IP 리터럴 (IPv4 / IPv6) 단일 주소 해석 변환 검증
+// ============================================================================
+
+#[test]
+fn test_dns_to_quick_result_literal_ipv4_resolved_success() {
+    let ctx = sample_context("127.0.0.1", 80);
+    let mut measurement = sample_measurement("127.0.0.1", 80, OUTCOME_RESOLVED);
+    measurement.addresses = vec!["127.0.0.1:80".to_string()];
+
+    let res = dns_to_quick_result(&ctx, &measurement).expect("IPv4 리터럴 변환 성공");
+
+    assert_eq!(res.status, QuickStatus::PASS);
+    assert_eq!(res.evidence_level, EvidenceLevel::OBSERVED);
+    assert_eq!(res.resolved_ip, None);
+    assert_eq!(
+        res.details["raw_measurement"]["addresses"][0],
+        "127.0.0.1:80"
+    );
+}
+
+#[test]
+fn test_dns_to_quick_result_literal_ipv6_resolved_success() {
+    let ctx = sample_context("::1", 80);
+    let mut measurement = sample_measurement("::1", 80, OUTCOME_RESOLVED);
+    measurement.addresses = vec!["[::1]:80".to_string()];
+
+    let res = dns_to_quick_result(&ctx, &measurement).expect("IPv6 리터럴 변환 성공");
+
+    assert_eq!(res.status, QuickStatus::PASS);
+    assert_eq!(res.evidence_level, EvidenceLevel::OBSERVED);
+    assert_eq!(res.resolved_ip, None);
+    assert_eq!(res.details["raw_measurement"]["addresses"][0], "[::1]:80");
+}
+
+// ============================================================================
+// 3. 다중 주소 (IPv4 + IPv6 복합) 및 최대 32개 상한 보존 검증
 // ============================================================================
 
 #[test]
@@ -125,7 +163,7 @@ fn test_dns_to_quick_result_multiple_addresses_and_max_limit() {
     for i in 1..=16 {
         addrs.push(format!("[2001:db8::{i:x}]:80"));
     }
-    measurement.addresses = addrs.clone();
+    measurement.addresses = addrs;
 
     let res = dns_to_quick_result(&ctx, &measurement).expect("32개 주소 변환 성공");
 
@@ -142,7 +180,7 @@ fn test_dns_to_quick_result_multiple_addresses_and_max_limit() {
 }
 
 // ============================================================================
-// 3. 중복 주소 및 불량 raw 주소 포함 시 fail-closed 거부 검증
+// 4. 중복 주소 및 불량 raw 주소 포함 시 fail-closed 거부 검증
 // ============================================================================
 
 #[test]
@@ -207,7 +245,7 @@ fn test_dns_to_quick_result_rejects_invalid_raw_addresses() {
 }
 
 // ============================================================================
-// 4. RESOLVED outcome인데 주소 목록이 빈 경우 정상 PASS 금지 검증
+// 5. RESOLVED outcome인데 주소 목록이 빈 경우 정상 PASS 금지 검증
 // ============================================================================
 
 #[test]
@@ -218,13 +256,14 @@ fn test_dns_to_quick_result_rejects_empty_addresses_on_resolved() {
 
     let err = dns_to_quick_result(&ctx, &measurement).unwrap_err();
     assert!(
-        err.iter().any(|msg| msg.contains("빈 주소 정상 PASS 금지") || msg.contains("비어 있습니다")),
+        err.iter()
+            .any(|msg| msg.contains("빈 주소 정상 PASS 금지") || msg.contains("비어 있습니다")),
         "RESOLVED 상태에서 주소가 없으면 정상 PASS로 간주하지 않고 거부해야 함: {err:?}"
     );
 }
 
 // ============================================================================
-// 5. ctx host 및 port 불일치 시 Err 검증 (raw trim 금지)
+// 6. ctx host 및 port 불일치 시 Err 검증 (raw trim 금지)
 // ============================================================================
 
 #[test]
@@ -268,7 +307,177 @@ fn test_dns_to_quick_result_rejects_port_mismatch() {
 }
 
 // ============================================================================
-// 6. 각 outcome 및 미지 outcome 매핑 검증
+// 7. 부모 실동작 6회귀 및 엄격 경계 검증 (dns-parent-boundaries 대응)
+// ============================================================================
+
+#[test]
+fn test_resolved_with_error_metadata_must_not_pass() {
+    let ctx = sample_context("localhost", 80);
+    let mut m = sample_measurement("localhost", 80, OUTCOME_RESOLVED);
+    m.addresses = vec!["127.0.0.1:80".to_string()];
+    m.error_code = Some(11001);
+    m.error_message = Some("synthetic error".to_string());
+
+    let r = dns_to_quick_result(&ctx, &m);
+    assert!(
+        r.is_err() || r.unwrap().status != QuickStatus::PASS,
+        "RESOLVED+OS error 모순을 PASS로 승격하면 안 됨"
+    );
+}
+
+#[test]
+fn test_dns_error_with_addresses_is_rejected() {
+    let ctx = sample_context("localhost", 80);
+    let mut m = sample_measurement("localhost", 80, OUTCOME_DNS_ERROR);
+    m.addresses = vec!["127.0.0.1:80".to_string()];
+    m.error_code = Some(11001);
+    m.error_message = Some("synthetic error".to_string());
+
+    assert!(
+        dns_to_quick_result(&ctx, &m).is_err(),
+        "실제 engine이 허용하지 않는 오류+주소 모순은 adapter에서도 거부"
+    );
+}
+
+#[test]
+fn test_dns_error_requires_message_and_allows_none_code() {
+    let ctx = sample_context("notfound.example.com", 80);
+
+    // 1) error_code가 None이어도 유효한 error_message가 있으면 정상 FAIL 매핑
+    let mut m1 = sample_measurement("notfound.example.com", 80, OUTCOME_DNS_ERROR);
+    m1.error_code = None;
+    m1.error_message = Some("getaddrinfo EAI_NONAME".to_string());
+    let res1 = dns_to_quick_result(&ctx, &m1).expect("code 없는 DNS_ERROR 허용");
+    assert_eq!(res1.status, QuickStatus::FAIL);
+    assert_eq!(res1.evidence_level, EvidenceLevel::OBSERVED);
+    assert_eq!(res1.os_error_code, None);
+
+    // 2) error_message가 None인 경우 (코드만 있고 메시지 부재)는 거부
+    let mut m2 = sample_measurement("notfound.example.com", 80, OUTCOME_DNS_ERROR);
+    m2.error_code = Some(11001);
+    m2.error_message = None;
+    assert!(
+        dns_to_quick_result(&ctx, &m2).is_err(),
+        "오류 코드만 있고 메시지 없는 모순 거부"
+    );
+
+    // 3) error_message가 빈 문자열/공백인 경우 거부
+    let mut m3 = sample_measurement("notfound.example.com", 80, OUTCOME_DNS_ERROR);
+    m3.error_code = Some(11001);
+    m3.error_message = Some("   ".to_string());
+    assert!(
+        dns_to_quick_result(&ctx, &m3).is_err(),
+        "빈 오류 메시지 거부"
+    );
+}
+
+#[test]
+fn test_non_success_outcomes_reject_nonempty_addresses() {
+    let ctx = sample_context("example.com", 80);
+
+    // TIMED_OUT에 주소가 있으면 거부
+    let mut m_timeout = sample_measurement("example.com", 80, OUTCOME_TIMED_OUT);
+    m_timeout.addresses = vec!["93.184.216.34:80".to_string()];
+    assert!(
+        dns_to_quick_result(&ctx, &m_timeout).is_err(),
+        "TIMED_OUT 주소 포함 거부"
+    );
+
+    // CANCELLED에 주소가 있으면 거부
+    let mut m_cancel = sample_measurement("example.com", 80, OUTCOME_CANCELLED);
+    m_cancel.addresses = vec!["93.184.216.34:80".to_string()];
+    assert!(
+        dns_to_quick_result(&ctx, &m_cancel).is_err(),
+        "CANCELLED 주소 포함 거부"
+    );
+
+    // LOCAL_ERROR에 주소가 있으면 거부
+    let mut m_local = sample_measurement("example.com", 80, OUTCOME_LOCAL_ERROR);
+    m_local.addresses = vec!["93.184.216.34:80".to_string()];
+    assert!(
+        dns_to_quick_result(&ctx, &m_local).is_err(),
+        "LOCAL_ERROR 주소 포함 거부"
+    );
+}
+
+#[test]
+fn test_invalid_raw_host_must_not_pass() {
+    let hosts = [
+        "invalid host",
+        "http://example.com",
+        "host..com",
+        "-badhost.com",
+        "badhost-.com",
+        "host/path",
+    ];
+    for bad_host in hosts {
+        let ctx = sample_context(bad_host, 80);
+        let mut m = sample_measurement(bad_host, 80, OUTCOME_RESOLVED);
+        m.addresses = vec!["127.0.0.1:80".to_string()];
+        let r = dns_to_quick_result(&ctx, &m);
+        assert!(
+            r.is_err() || r.unwrap().status != QuickStatus::PASS,
+            "engine이 거부하는 불량 raw host('{bad_host}')를 DNS 관측 PASS로 승격 금지"
+        );
+    }
+}
+
+#[test]
+fn test_literal_host_foreign_address_is_rejected() {
+    let ctx = sample_context("127.0.0.1", 80);
+    let mut m = sample_measurement("127.0.0.1", 80, OUTCOME_RESOLVED);
+    m.addresses = vec!["192.0.2.1:80".to_string()];
+    assert!(
+        dns_to_quick_result(&ctx, &m).is_err(),
+        "리터럴의 외부 IP 귀속 금지"
+    );
+
+    let ctx_v6 = sample_context("::1", 80);
+    let mut m_v6 = sample_measurement("::1", 80, OUTCOME_RESOLVED);
+    m_v6.addresses = vec!["[2001:db8::1]:80".to_string()];
+    assert!(
+        dns_to_quick_result(&ctx_v6, &m_v6).is_err(),
+        "IPv6 리터럴의 외부 IP 귀속 금지"
+    );
+}
+
+#[test]
+fn test_literal_host_multiple_addresses_are_rejected() {
+    let ctx_v6 = sample_context("::1", 80);
+    let mut m_v6 = sample_measurement("::1", 80, OUTCOME_RESOLVED);
+    m_v6.addresses = vec!["[::1]:80".to_string(), "127.0.0.1:80".to_string()];
+    assert!(
+        dns_to_quick_result(&ctx_v6, &m_v6).is_err(),
+        "리터럴 경로는 동일 IP 단일주소만 가능"
+    );
+
+    let ctx_v4 = sample_context("127.0.0.1", 80);
+    let mut m_v4 = sample_measurement("127.0.0.1", 80, OUTCOME_RESOLVED);
+    m_v4.addresses = vec!["127.0.0.1:80".to_string(), "127.0.0.2:80".to_string()];
+    assert!(
+        dns_to_quick_result(&ctx_v4, &m_v4).is_err(),
+        "IPv4 리터럴 경로는 단일주소만 가능"
+    );
+}
+
+#[test]
+fn test_rejected_credential_host_is_not_reflected_in_error() {
+    let host = "https://user:BOUNDARY_MARKER@example.com/path";
+    let ctx = sample_context(host, 80);
+    let mut m = sample_measurement(host, 80, OUTCOME_RESOLVED);
+    m.addresses = vec!["127.0.0.1:80".to_string()];
+
+    let errors = dns_to_quick_result(&ctx, &m).expect_err("불량 호스트는 Err");
+    assert!(
+        errors
+            .iter()
+            .all(|e| !e.contains("BOUNDARY_MARKER") && !e.contains(host)),
+        "거부한 원문·합성 민감값을 오류에 반사 금지: {errors:?}"
+    );
+}
+
+// ============================================================================
+// 8. 각 outcome 및 미지 outcome 매핑 검증
 // ============================================================================
 
 #[test]
@@ -341,7 +550,9 @@ fn test_dns_to_quick_result_unknown_outcome_mapping() {
     assert_eq!(res.evidence_level, EvidenceLevel::UNKNOWN);
     assert_eq!(res.resolved_ip, None);
 
-    let limitations = res.details["limitations"].as_array().expect("limitations 배열");
+    let limitations = res.details["limitations"]
+        .as_array()
+        .expect("limitations 배열");
     assert!(
         limitations
             .iter()
@@ -351,7 +562,7 @@ fn test_dns_to_quick_result_unknown_outcome_mapping() {
 }
 
 // ============================================================================
-// 7. Nullable 필드 및 QG1 스키마 규격 검증
+// 9. Nullable 필드 및 QG1 스키마 규격 검증
 // ============================================================================
 
 #[test]
@@ -388,7 +599,7 @@ fn test_dns_to_quick_result_nullable_fields_handling() {
 }
 
 // ============================================================================
-// 8. 불량 컨텍스트 데이터 거부 검증 (QG1 유효성 규칙 준수)
+// 10. 불량 컨텍스트 데이터 거부 검증 (QG1 유효성 규칙 준수, unused mut 제거)
 // ============================================================================
 
 #[test]
@@ -406,12 +617,12 @@ fn test_dns_to_quick_result_rejects_invalid_context_data() {
     ctx2.session_id = "   ".to_string();
     assert!(dns_to_quick_result(&ctx2, &measurement).is_err());
 
-    // 3) 빈 target_host
-    let mut ctx3 = sample_context("", 80);
+    // 3) 빈 target_host (unused mut 제거)
+    let ctx3 = sample_context("", 80);
     assert!(dns_to_quick_result(&ctx3, &measurement).is_err());
 
-    // 4) 포트 0
-    let mut ctx4 = sample_context("example.com", 0);
+    // 4) 포트 0 (unused mut 제거)
+    let ctx4 = sample_context("example.com", 0);
     assert!(dns_to_quick_result(&ctx4, &measurement).is_err());
 
     // 5) 유효하지 않은 timestamp_iso8601
@@ -431,7 +642,7 @@ fn test_dns_to_quick_result_rejects_invalid_context_data() {
 }
 
 // ============================================================================
-// 9. OS 오류 코드 보존 검증
+// 11. OS 오류 코드 보존 검증
 // ============================================================================
 
 #[test]
@@ -441,23 +652,26 @@ fn test_dns_to_quick_result_preserves_os_error_codes() {
     // Some(10060) WSAETIMEDOUT
     let mut m1 = sample_measurement("error.example.com", 80, OUTCOME_DNS_ERROR);
     m1.error_code = Some(10060);
+    m1.error_message = Some("연결 시간 초과".to_string());
     let res1 = dns_to_quick_result(&ctx, &m1).unwrap();
     assert_eq!(res1.os_error_code, Some(10060));
 
     // Some(-1) 음수 OS 오류 코드
     let mut m2 = sample_measurement("error.example.com", 80, OUTCOME_DNS_ERROR);
     m2.error_code = Some(-1);
+    m2.error_message = Some("알 수 없는 내부 오류".to_string());
     let res2 = dns_to_quick_result(&ctx, &m2).unwrap();
     assert_eq!(res2.os_error_code, Some(-1));
 
     // None
-    let m3 = sample_measurement("error.example.com", 80, OUTCOME_DNS_ERROR);
+    let mut m3 = sample_measurement("error.example.com", 80, OUTCOME_DNS_ERROR);
+    m3.error_message = Some("일반 해석 실패".to_string());
     let res3 = dns_to_quick_result(&ctx, &m3).unwrap();
     assert_eq!(res3.os_error_code, None);
 }
 
 // ============================================================================
-// 10. resolve_for_quick 단위 시험 (IP 리터럴 우회, 사전 취소, 불량 인자)
+// 12. resolve_for_quick 단위 시험 (IP 리터럴 우회, 사전 취소, 불량 인자)
 // ============================================================================
 
 #[test]
@@ -479,7 +693,9 @@ fn test_resolve_for_quick_ip_literal_bypasses_process_offline() {
 
     let limitations = res.details["limitations"].as_array().unwrap();
     assert!(
-        limitations.iter().any(|l| l.as_str().unwrap().contains("IP 리터럴")),
+        limitations
+            .iter()
+            .any(|l| l.as_str().unwrap().contains("IP 리터럴")),
         "IP 리터럴 안내 문구 포함 필수"
     );
 }
@@ -507,25 +723,43 @@ fn test_resolve_for_quick_rejects_invalid_context_early() {
     let cancel = Arc::new(AtomicBool::new(false));
 
     let err = resolve_for_quick(&ctx, dummy_exe, Duration::from_secs(1), cancel).unwrap_err();
-    assert!(!err.is_empty(), "불량 컨텍스트는 helper 실행 전 조기 거부되어야 함");
+    assert!(
+        !err.is_empty(),
+        "불량 컨텍스트는 helper 실행 전 조기 거부되어야 함"
+    );
+}
+
+#[test]
+fn test_resolve_for_quick_rejects_invalid_raw_host_early() {
+    let ctx = sample_context("https://user:pass@example.com/path", 80);
+    let dummy_exe = Path::new("C:/target/release/npi.exe");
+    let cancel = Arc::new(AtomicBool::new(false));
+
+    let err = resolve_for_quick(&ctx, dummy_exe, Duration::from_secs(1), cancel).unwrap_err();
+    assert!(
+        !err.is_empty(),
+        "불량 호스트는 helper 실행 전 조기 거부되어야 함"
+    );
+    assert!(
+        err.iter().all(|e| !e.contains("user:pass")),
+        "원문 자격증명이 오류에 반사되지 않아야 함"
+    );
 }
 
 // ============================================================================
-// 11. 부모 명시 실행: localhost helper 격리 시험 (#[ignore])
+// 13. 부모 명시 실행: localhost helper 격리 시험 (#[ignore])
 // ============================================================================
 
 #[test]
 #[ignore = "부모 명시 실행: localhost helper 격리 시험"]
 fn test_real_localhost_helper_resolve_for_quick() {
-    let exe_var = match std::env::var("NPI_TEST_HELPER_EXE") {
-        Ok(val) => val,
-        Err(_) => {
-            eprintln!("NPI_TEST_HELPER_EXE 미설정: 부모가 제품 바이너리 경로를 제공해야 격리 시험 가능");
-            return;
-        }
-    };
+    let exe_var = std::env::var("NPI_TEST_HELPER_EXE")
+        .expect("NPI_TEST_HELPER_EXE 환경변수가 설정되어 있어야 격리 시험 가능");
     let exe_path = Path::new(&exe_var);
-    assert!(exe_path.is_absolute(), "NPI_TEST_HELPER_EXE는 절대 경로여야 함");
+    assert!(
+        exe_path.is_absolute(),
+        "NPI_TEST_HELPER_EXE는 절대 경로여야 함"
+    );
 
     let ctx = sample_context("localhost", 80);
     let cancel = Arc::new(AtomicBool::new(false));
@@ -535,9 +769,19 @@ fn test_real_localhost_helper_resolve_for_quick() {
 
     assert_eq!(res.target_host, "localhost");
     assert_eq!(res.target_port, 80);
-    assert!(
-        res.status == QuickStatus::PASS || res.status == QuickStatus::FAIL,
-        "localhost 해석 결과는 PASS(정상해석) 또는 FAIL(OS 해석 실패)이어야 함"
+    assert_eq!(
+        res.status,
+        QuickStatus::PASS,
+        "localhost 실제 해석은 PASS여야 함 (OS 실패를 성공으로 허용하지 않음)"
     );
+    assert_eq!(res.evidence_level, EvidenceLevel::OBSERVED);
     assert_eq!(res.resolved_ip, None, "lookup 결과의 resolved_ip는 null");
+
+    let raw_addrs = res.details["raw_measurement"]["addresses"]
+        .as_array()
+        .expect("addresses 배열");
+    assert!(
+        !raw_addrs.is_empty(),
+        "localhost 해석 결과 주소 목록은 비어있지 않아야 함"
+    );
 }

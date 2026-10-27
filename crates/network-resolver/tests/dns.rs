@@ -11,8 +11,8 @@ use dns::*;
 use std::io::{self, Cursor};
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 // ============================================================================
@@ -131,9 +131,15 @@ fn test_strict_host_rules_whitespace_and_control() {
 
 #[test]
 fn test_strict_host_rules_prohibited_characters() {
-    assert!(validate_host("http://example.com").is_err(), "URI 스키마 거부");
+    assert!(
+        validate_host("http://example.com").is_err(),
+        "URI 스키마 거부"
+    );
     assert!(validate_host("example.com/path").is_err(), "URI 경로 거부");
-    assert!(validate_host("user:pass@example.com").is_err(), "자격증명 거부");
+    assert!(
+        validate_host("user:pass@example.com").is_err(),
+        "자격증명 거부"
+    );
     assert!(validate_host("192.168.1.0/24").is_err(), "CIDR 표기 거부");
     assert!(validate_host("*.example.com").is_err(), "와일드카드 거부");
     assert!(validate_host("example_name.com").is_err(), "밑줄(_) 거부");
@@ -157,13 +163,28 @@ fn test_strict_host_rules_valid_ipv4() {
 
 #[test]
 fn test_strict_host_rules_invalid_ipv4() {
-    assert!(validate_host("127.0.0.1.").is_err(), "후행 점이 있는 IPv4 거부");
-    assert!(validate_host("127.0.0.01").is_err(), "선행 0이 있는 IPv4 거부");
-    assert!(validate_host("01.2.3.4").is_err(), "선행 0이 있는 IPv4 거부");
+    assert!(
+        validate_host("127.0.0.1.").is_err(),
+        "후행 점이 있는 IPv4 거부"
+    );
+    assert!(
+        validate_host("127.0.0.01").is_err(),
+        "선행 0이 있는 IPv4 거부"
+    );
+    assert!(
+        validate_host("01.2.3.4").is_err(),
+        "선행 0이 있는 IPv4 거부"
+    );
     assert!(validate_host("127.1").is_err(), "4옥텟 미만 IPv4 거부");
     assert!(validate_host("1.2.3.4.5").is_err(), "4옥텟 초과 IPv4 거부");
-    assert!(validate_host("256.0.0.1").is_err(), "255 초과 옥텟 IPv4 거부");
-    assert!(validate_host("0x7f000001").is_err(), "16진 정수형 주소 거부");
+    assert!(
+        validate_host("256.0.0.1").is_err(),
+        "255 초과 옥텟 IPv4 거부"
+    );
+    assert!(
+        validate_host("0x7f000001").is_err(),
+        "16진 정수형 주소 거부"
+    );
     assert!(validate_host("0x7f.0.0.1").is_err(), "16진 라벨 주소 거부");
 }
 
@@ -191,8 +212,14 @@ fn test_strict_host_rules_valid_ipv6() {
 #[test]
 fn test_strict_host_rules_invalid_ipv6() {
     assert!(validate_host("[::1]").is_err(), "대괄호 포함 IPv6 거부");
-    assert!(validate_host("[::1]:80").is_err(), "대괄호 및 포트 포함 IPv6 거부");
-    assert!(validate_host("fe80::1%eth0").is_err(), "영역 ID 포함 IPv6 거부");
+    assert!(
+        validate_host("[::1]:80").is_err(),
+        "대괄호 및 포트 포함 IPv6 거부"
+    );
+    assert!(
+        validate_host("fe80::1%eth0").is_err(),
+        "영역 ID 포함 IPv6 거부"
+    );
     assert!(validate_host("2001:::1").is_err(), "잘못된 IPv6 구문 거부");
 }
 
@@ -202,16 +229,28 @@ fn test_strict_host_rules_domain_names() {
     assert_eq!(validate_host("localhost."), Ok(HostKind::DomainName));
     assert_eq!(validate_host("example.com"), Ok(HostKind::DomainName));
     assert_eq!(validate_host("example.com."), Ok(HostKind::DomainName));
-    assert_eq!(validate_host("sub-host.example-domain.org"), Ok(HostKind::DomainName));
+    assert_eq!(
+        validate_host("sub-host.example-domain.org"),
+        Ok(HostKind::DomainName)
+    );
 
     // 라벨 63자 초과
     let label64 = format!("{}.com", "a".repeat(64));
     assert!(validate_host(&label64).is_err(), "라벨 길이 63자 초과 거부");
 
     // 하이픈 시작/끝 라벨
-    assert!(validate_host("-example.com").is_err(), "선행 하이픈 라벨 거부");
-    assert!(validate_host("example-.com").is_err(), "후행 하이픈 라벨 거부");
-    assert!(validate_host("sub.-test.com").is_err(), "중간 선행 하이픈 거부");
+    assert!(
+        validate_host("-example.com").is_err(),
+        "선행 하이픈 라벨 거부"
+    );
+    assert!(
+        validate_host("example-.com").is_err(),
+        "후행 하이픈 라벨 거부"
+    );
+    assert!(
+        validate_host("sub.-test.com").is_err(),
+        "중간 선행 하이픈 거부"
+    );
 
     // 빈 라벨
     assert!(validate_host(".").is_err(), "단일 점 거부");
@@ -229,10 +268,22 @@ fn test_validate_port_range() {
 
 #[test]
 fn test_validate_timeout_range() {
-    assert!(validate_timeout(Duration::from_millis(0)).is_err(), "시한 0ms 거부");
-    assert!(validate_timeout(Duration::from_millis(1)).is_ok(), "시한 1ms 허용");
-    assert!(validate_timeout(Duration::from_millis(60_000)).is_ok(), "시한 60000ms 허용");
-    assert!(validate_timeout(Duration::from_millis(60_001)).is_err(), "시한 60001ms 거부");
+    assert!(
+        validate_timeout(Duration::from_millis(0)).is_err(),
+        "시한 0ms 거부"
+    );
+    assert!(
+        validate_timeout(Duration::from_millis(1)).is_ok(),
+        "시한 1ms 허용"
+    );
+    assert!(
+        validate_timeout(Duration::from_millis(60_000)).is_ok(),
+        "시한 60000ms 허용"
+    );
+    assert!(
+        validate_timeout(Duration::from_millis(60_001)).is_err(),
+        "시한 60001ms 거부"
+    );
 }
 
 #[test]
@@ -284,7 +335,10 @@ fn test_collect_unique_addresses_max_32_and_truncation() {
     // 40개의 서로 다른 주소 생성
     let mut addrs = Vec::new();
     for i in 1..=40 {
-        addrs.push(SocketAddr::new(Ipv4Addr::new(10, 0, 0, i).into(), target_port));
+        addrs.push(SocketAddr::new(
+            Ipv4Addr::new(10, 0, 0, i).into(),
+            target_port,
+        ));
     }
 
     let (collected, truncated) = collect_unique_addresses(addrs, target_port);
@@ -379,7 +433,10 @@ fn test_decode_payload_address_port_mismatch() {
     };
     let line = worker_output_line(&payload);
     let err = decode_worker_payload(line.as_bytes(), "example.com", 80).unwrap_err();
-    assert!(err.contains("helper 주소 포트가 요청 포트와 다름"), "에러: {err}");
+    assert!(
+        err.contains("helper 주소 포트가 요청 포트와 다름"),
+        "에러: {err}"
+    );
 }
 
 #[test]
@@ -452,7 +509,10 @@ fn test_decode_payload_error_code_without_message_rejected() {
     };
     let line = worker_output_line(&payload);
     let err = decode_worker_payload(line.as_bytes(), "example.com", 80).unwrap_err();
-    assert!(err.contains("오류 코드만 있고 메시지가 없음"), "에러: {err}");
+    assert!(
+        err.contains("오류 코드만 있고 메시지가 없음"),
+        "에러: {err}"
+    );
 }
 
 #[test]
@@ -469,7 +529,10 @@ fn test_decode_payload_error_message_length_limit() {
     };
     let line = worker_output_line(&payload);
     let err = decode_worker_payload(line.as_bytes(), "example.com", 80).unwrap_err();
-    assert!(err.contains("helper 오류 메시지 길이 상한 초과"), "에러: {err}");
+    assert!(
+        err.contains("helper 오류 메시지 길이 상한 초과"),
+        "에러: {err}"
+    );
 }
 
 #[test]
@@ -529,7 +592,10 @@ fn test_decode_payload_multiline_or_carriage_return_rejected() {
     let mut line = worker_output_line(&payload);
     line.push_str("extra second line\n");
     let err = decode_worker_payload(line.as_bytes(), "example.com", 80).unwrap_err();
-    assert!(err.contains("helper stdout이 정확히 한 줄 JSON이 아님"), "에러: {err}");
+    assert!(
+        err.contains("helper stdout이 정확히 한 줄 JSON이 아님"),
+        "에러: {err}"
+    );
 }
 
 #[test]
@@ -821,7 +887,10 @@ fn test_supervise_helper_success_normal_exit() {
     let verdict = supervise_helper(&mut handle, "example.com", 80, deadline, &cancelled);
 
     assert_eq!(verdict, HelperVerdict::Payload(payload));
-    assert_eq!(handle.terminate_count, 1, "정상 종료 후 terminate 호출 필수");
+    assert_eq!(
+        handle.terminate_count, 1,
+        "정상 종료 후 terminate 호출 필수"
+    );
 }
 
 #[test]
@@ -840,7 +909,13 @@ fn test_supervise_helper_dns_error_exit() {
     let cancelled = AtomicBool::new(false);
     let deadline = Instant::now() + Duration::from_secs(1);
 
-    let verdict = supervise_helper(&mut handle, "notfound.example.com", 80, deadline, &cancelled);
+    let verdict = supervise_helper(
+        &mut handle,
+        "notfound.example.com",
+        80,
+        deadline,
+        &cancelled,
+    );
 
     assert_eq!(verdict, HelperVerdict::Payload(payload));
     assert_eq!(handle.terminate_count, 1, "DNS 오류 종료 후 terminate 필수");
@@ -915,7 +990,10 @@ fn test_supervise_helper_timeout_cancels_and_terminates() {
     let verdict = supervise_helper(&mut handle, "example.com", 80, deadline, &cancelled);
 
     assert_eq!(verdict, HelperVerdict::TimedOut);
-    assert_eq!(handle.terminate_count, 1, "시한 초과 시 terminate(kill+wait+reader join) 필수");
+    assert_eq!(
+        handle.terminate_count, 1,
+        "시한 초과 시 terminate(kill+wait+reader join) 필수"
+    );
 }
 
 #[test]
@@ -955,7 +1033,11 @@ fn test_supervise_helper_cancellation_wins_after_response() {
 
     let verdict = supervise_helper(&mut handle, "example.com", 80, deadline, &cancelled);
 
-    assert_eq!(verdict, HelperVerdict::Cancelled, "응답 수신 후에도 취소가 우선해야 함");
+    assert_eq!(
+        verdict,
+        HelperVerdict::Cancelled,
+        "응답 수신 후에도 취소가 우선해야 함"
+    );
     assert_eq!(handle.terminate_count, 1);
 }
 
@@ -992,7 +1074,10 @@ fn test_supervise_helper_expired_ready_prefers_deadline() {
         HelperVerdict::TimedOut,
         "이미 완료된 상태라도 전체 마감시간이 만료되었으면 TimedOut이 우선해야 함"
     );
-    assert_eq!(handle.terminate_count, 1, "만료 판정 시에도 terminate 호출 필수");
+    assert_eq!(
+        handle.terminate_count, 1,
+        "만료 판정 시에도 terminate 호출 필수"
+    );
 }
 
 #[test]
@@ -1022,7 +1107,10 @@ fn test_supervise_helper_late_poll_completion_loses_to_deadline() {
         HelperVerdict::TimedOut,
         "poll 도중 마감시간이 만료되었으면 늦게 관찰된 완료보다 TimedOut이 우선해야 함"
     );
-    assert_eq!(handle.terminate_count, 1, "만료 판정 시에도 terminate 호출 필수");
+    assert_eq!(
+        handle.terminate_count, 1,
+        "만료 판정 시에도 terminate 호출 필수"
+    );
 }
 
 #[test]
@@ -1051,7 +1139,10 @@ fn test_supervise_helper_cancellation_during_terminate_overrides_early_timeout()
         HelperVerdict::Cancelled,
         "정리 중 발생한 취소는 early TimedOut보다 최우선이어야 함"
     );
-    assert_eq!(handle.terminate_count, 1, "만료 판정 시에도 terminate는 반드시 1회 수행되어야 함");
+    assert_eq!(
+        handle.terminate_count, 1,
+        "만료 판정 시에도 terminate는 반드시 1회 수행되어야 함"
+    );
     assert!(
         !poll_called.load(Ordering::SeqCst),
         "만료 deadline 조건에서는 poll 호출 없이도 terminate가 반드시 수행되어야 함"
@@ -1079,7 +1170,10 @@ fn test_supervise_helper_cancellation_during_terminate_overrides_early_overflow(
         HelperVerdict::Cancelled,
         "정리 중 발생한 취소는 early LocalError(stdout 상한 초과)보다 최우선이어야 함"
     );
-    assert_eq!(handle.terminate_count, 1, "상한 초과 정리 시에도 terminate는 반드시 1회 수행되어야 함");
+    assert_eq!(
+        handle.terminate_count, 1,
+        "상한 초과 정리 시에도 terminate는 반드시 1회 수행되어야 함"
+    );
 }
 
 // ============================================================================
@@ -1127,8 +1221,15 @@ fn test_measurement_from_verdict_worker_input_rejected_prefix() {
         error_message: Some(format!("{WORKER_INPUT_REJECTED_PREFIX} 포트 오류")),
     };
     let m = measurement_from_verdict("example.com", 80, HelperVerdict::Payload(payload), 5);
-    assert_eq!(m.outcome, OUTCOME_LOCAL_ERROR, "WORKER_INPUT_REJECTED는 LOCAL_ERROR로 분류");
-    assert!(m.error_message.unwrap().contains("WORKER_INPUT_REJECTED: 포트 오류"));
+    assert_eq!(
+        m.outcome, OUTCOME_LOCAL_ERROR,
+        "WORKER_INPUT_REJECTED는 LOCAL_ERROR로 분류"
+    );
+    assert!(
+        m.error_message
+            .unwrap()
+            .contains("WORKER_INPUT_REJECTED: 포트 오류")
+    );
 }
 
 #[test]
@@ -1142,10 +1243,19 @@ fn test_measurement_from_verdict_dns_error_preserves_raw_code_and_message() {
         error_code: Some(11001),
         error_message: Some("No such host is known".to_string()),
     };
-    let m = measurement_from_verdict("unknown-host.example", 80, HelperVerdict::Payload(payload), 35);
+    let m = measurement_from_verdict(
+        "unknown-host.example",
+        80,
+        HelperVerdict::Payload(payload),
+        35,
+    );
     assert_eq!(m.outcome, OUTCOME_DNS_ERROR);
     assert_eq!(m.error_code, Some(11001), "원시 OS 에러 코드 보존");
-    assert_eq!(m.error_message, Some("No such host is known".to_string()), "원시 OS 에러 메시지 보존");
+    assert_eq!(
+        m.error_message,
+        Some("No such host is known".to_string()),
+        "원시 OS 에러 메시지 보존"
+    );
     assert!(m.limitations.iter().any(|l| l.contains(LIMIT_DNS_ERROR)));
 }
 
@@ -1196,7 +1306,12 @@ fn test_resolver_worker_invalid_port_returns_rejected() {
     let payload = resolver_worker("example.com", 0);
     assert_eq!(payload.format, WORKER_FORMAT);
     assert!(payload.addresses.is_empty());
-    assert!(payload.error_message.unwrap().contains(WORKER_INPUT_REJECTED_PREFIX));
+    assert!(
+        payload
+            .error_message
+            .unwrap()
+            .contains(WORKER_INPUT_REJECTED_PREFIX)
+    );
 }
 
 #[test]
@@ -1204,7 +1319,12 @@ fn test_resolver_worker_invalid_host_returns_rejected() {
     let payload = resolver_worker("invalid:host:colon", 80);
     assert_eq!(payload.format, WORKER_FORMAT);
     assert!(payload.addresses.is_empty());
-    assert!(payload.error_message.unwrap().contains(WORKER_INPUT_REJECTED_PREFIX));
+    assert!(
+        payload
+            .error_message
+            .unwrap()
+            .contains(WORKER_INPUT_REJECTED_PREFIX)
+    );
 }
 
 #[test]
@@ -1229,7 +1349,12 @@ fn test_resolver_worker_ipv6_literal_without_os_resolver() {
 fn test_run_worker_from_args_invalid_port_string() {
     let payload = run_worker_from_args("example.com", "not_a_port");
     assert_eq!(payload.format, WORKER_FORMAT);
-    assert!(payload.error_message.unwrap().contains(WORKER_INPUT_REJECTED_PREFIX));
+    assert!(
+        payload
+            .error_message
+            .unwrap()
+            .contains(WORKER_INPUT_REJECTED_PREFIX)
+    );
 }
 
 // ============================================================================
@@ -1267,8 +1392,9 @@ fn test_real_localhost_helper_process_isolation() {
     // 부모가 main.rs에 helper 실행 플래그를 연결한 후 NPI_TEST_HELPER_EXE 환경변수로
     // 지정한 실제 제품 바이너리 경로(테스트 실행 파일 아님)로 localhost의 하위 프로세스 격리를 시험한다.
     // 외부 도메인을 사용하지 않으며, 부모가 추후 main/helper를 연결하고 명시적으로 실행한다.
-    let exe_var = std::env::var("NPI_TEST_HELPER_EXE")
-        .expect("명시 real 시험에는 NPI_TEST_HELPER_EXE 절대 경로가 필요하며 미설정은 성공이 아니다");
+    let exe_var = std::env::var("NPI_TEST_HELPER_EXE").expect(
+        "명시 real 시험에는 NPI_TEST_HELPER_EXE 절대 경로가 필요하며 미설정은 성공이 아니다",
+    );
     let exe_path = Path::new(&exe_var);
     assert!(
         exe_path.is_absolute(),
