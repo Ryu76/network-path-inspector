@@ -70,10 +70,12 @@ fn code_10013_maps_to_local_error() {
 }
 
 #[test]
-fn code_10054_maps_to_local_error() {
+fn code_10054_maps_to_reset() {
+    // Winsock 10054(WSAECONNRESET)의 기본 의미는 피어에 의한 연결 재설정(Connection reset by peer)이므로 RESET으로 분류한다.
+    // 단, OS가 보고한 재설정 오류만으로는 실제 캡처된 RST 패킷이나 그 물리적 발원지를 증명하지 않는다.
     assert_eq!(
         npi_core::classify_tcp_error(Some(10054), false, false),
-        "LOCAL_ERROR"
+        "RESET"
     );
 }
 
@@ -81,6 +83,24 @@ fn code_10054_maps_to_local_error() {
 fn code_11001_maps_to_dns_error() {
     assert_eq!(
         npi_core::classify_tcp_error(Some(11001), false, false),
+        "DNS_ERROR"
+    );
+}
+
+#[test]
+fn code_11002_maps_to_dns_error() {
+    // Winsock 11002(WSATRY_AGAIN)는 일시적 DNS 조회 실패이므로 DNS_ERROR로 분류한다.
+    assert_eq!(
+        npi_core::classify_tcp_error(Some(11002), false, false),
+        "DNS_ERROR"
+    );
+}
+
+#[test]
+fn code_11003_maps_to_dns_error() {
+    // Winsock 11003(WSANO_RECOVERY)는 복구 불가능한 DNS 조회 실패이므로 DNS_ERROR로 분류한다.
+    assert_eq!(
+        npi_core::classify_tcp_error(Some(11003), false, false),
         "DNS_ERROR"
     );
 }
@@ -108,6 +128,7 @@ fn tcp_outcome_serde_uses_screaming_snake_case() {
     let cases = [
         (npi_core::TcpOutcome::Connected, "CONNECTED"),
         (npi_core::TcpOutcome::Refused, "REFUSED"),
+        (npi_core::TcpOutcome::Reset, "RESET"),
         (npi_core::TcpOutcome::TimedOut, "TIMED_OUT"),
         (npi_core::TcpOutcome::Unreachable, "UNREACHABLE"),
         (npi_core::TcpOutcome::LocalError, "LOCAL_ERROR"),
