@@ -34,6 +34,8 @@ mod gui_coordinator;
 mod gui_entry;
 mod gui_presenter;
 pub mod gui_result_render;
+#[cfg(test)]
+mod gui_run_session;
 pub mod gui_state;
 #[cfg(windows)]
 mod native_gui;

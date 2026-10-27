@@ -1,7 +1,8 @@
 //! Network Quick Check(Part B) 순수 GUI 프레젠터 모듈.
 //!
-//! 본 모듈은 Win32 네이티브 윈도우와 분리된 순수 프레젠터(`GuiPresenter`)를 정의합니다.
-//! I/O, Win32 API, 네트워크, 프로세스, 시계 조회가 일체 배제되어 있습니다.
+//! 입력·계획 확인 경로는 Win32 윈도우와 분리된 순수 프레젠터입니다.
+//! 해당 경로에는 I/O, 네트워크, 프로세스, 시계 조회가 없습니다.
+//! cfg(test) 실행 브리지는 별도 호스트에 typed 위임하며, 그 경로에는 스레드·런타임·시간 효과가 있습니다.
 //!
 //! ## 핵심 설계 및 불변식
 //! - **GuiState 단일 소유 및 상태 비복제**: 대상 추가, 교체, 삭제는 기존 `GuiState` 메서드로만 수행합니다.
@@ -632,6 +633,104 @@ impl GuiPresenter {
 impl Default for GuiPresenter {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// GUI 프레젠터와 실행 호스트 브리지 사이에서 발생하는 오류.
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum RunBridgeError {
+    /// 프레젠터 계획 수립 및 유효성 검증 오류.
+    Presenter(PresenterError),
+    /// 실행 코디네이터 시작 요청 오류.
+    Start(crate::gui_coordinator::StartError),
+}
+
+#[cfg(test)]
+impl std::fmt::Display for RunBridgeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Presenter(e) => write!(f, "진단 계획 준비 오류: {e}"),
+            Self::Start(e) => write!(f, "진단 시작 오류: {e}"),
+        }
+    }
+}
+
+#[cfg(test)]
+impl std::error::Error for RunBridgeError {}
+
+/// 사전에 계획 검증을 통과한 불변 실행 후보.
+/// 외부에서 임의 생성할 수 없으며 단 1회의 enqueue 호출로 소비됩니다.
+#[cfg(test)]
+pub(crate) struct PreparedRunCandidate {
+    presenter: GuiPresenter,
+}
+
+#[cfg(test)]
+impl PreparedRunCandidate {
+    /// 검증된 실행 후보를 실행 코디네이터 큐에 적재합니다.
+    ///
+    /// 실제 호스트의 `try_start`에 후보 상태를 전달하며, 성공 시에만
+    /// 확정된 프레젠터와 실행 식별자를 반환합니다.
+    pub(crate) fn enqueue(
+        mut self,
+        host: &mut crate::gui_coordinator::GuiRunCoordinator,
+    ) -> Result<(GuiPresenter, crate::gui_state::RunId), RunBridgeError> {
+        let id = host
+            .try_start(&mut self.presenter.state)
+            .map_err(RunBridgeError::Start)?;
+        Ok((self.presenter, id))
+    }
+}
+
+#[cfg(test)]
+impl GuiPresenter {
+    /// 원본 프레젠터 변경 없이 사전 검증된 실행 후보를 생성합니다.
+    ///
+    /// 복제된 후보에 기존 `confirm_plan`을 호출하며, 실패 시 원본은 완전히 불변입니다.
+    pub(crate) fn prepare_run_candidate(&self) -> Result<PreparedRunCandidate, RunBridgeError> {
+        let mut candidate = self.clone();
+        candidate
+            .confirm_plan()
+            .map_err(RunBridgeError::Presenter)?;
+        Ok(PreparedRunCandidate {
+            presenter: candidate,
+        })
+    }
+
+    /// 실행 후보 생성 및 큐 적재를 원자적으로 수행하여 성공 시에만 self를 확정합니다.
+    pub(crate) fn try_start_run(
+        &mut self,
+        host: &mut crate::gui_coordinator::GuiRunCoordinator,
+    ) -> Result<crate::gui_state::RunId, RunBridgeError> {
+        let candidate = self.prepare_run_candidate()?;
+        let (confirmed, id) = candidate.enqueue(host)?;
+        *self = confirmed;
+        Ok(id)
+    }
+
+    /// 실행 호스트에 취소 의사를 전달합니다.
+    pub(crate) fn request_run_cancel(
+        &mut self,
+        host: &mut crate::gui_coordinator::GuiRunCoordinator,
+    ) -> Result<Option<crate::gui_state::RunId>, crate::gui_coordinator::CoordinatorError> {
+        host.request_cancel(&mut self.state)
+    }
+
+    /// 실행 호스트로부터 완료 통보 및 상태를 폴링하여 반영합니다.
+    pub(crate) fn poll_run(
+        &mut self,
+        host: &mut crate::gui_coordinator::GuiRunCoordinator,
+    ) -> crate::gui_coordinator::PollOutcome {
+        host.poll(&mut self.state)
+    }
+
+    /// 실행 호스트에 종료를 요청합니다.
+    pub(crate) fn begin_run_close(
+        &mut self,
+        host: &mut crate::gui_coordinator::GuiRunCoordinator,
+    ) -> Result<(), crate::gui_coordinator::CoordinatorError> {
+        host.begin_close(&mut self.state)
     }
 }
 

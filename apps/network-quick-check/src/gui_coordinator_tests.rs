@@ -1562,3 +1562,244 @@ fn parent_native_pending_same_arc_full_result_and_runtime_drop_are_one_observed_
     assert!(c.is_shutdown_complete());
     assert_eq!(c.lifecycle(), HostLifecycle::Closed);
 }
+
+// QG3E 후속 tests-only 범위: 기존 private seam에서 실제 세션의 전달 전후 전체 결과를 비교한다.
+mod session_delivery_regressions {
+    use super::*;
+    use crate::gui_presenter::GuiPresenter;
+    use crate::gui_run_session::{GuiRunSession, SessionShutdown};
+
+    /// session private field를 건드리지 않는 단일 소유 시험 fixture.
+    struct SessionFixture {
+        session: GuiRunSession,
+        releases: Vec<Arc<Gate>>,
+        cleanup_observed: Arc<AtomicBool>,
+    }
+    impl SessionFixture {
+        fn new(releases: Vec<Arc<Gate>>) -> Self {
+            let mut f = Self {
+                session: GuiRunSession::new(GuiPresenter::new()),
+                releases,
+                cleanup_observed: Arc::new(AtomicBool::new(false)),
+            };
+            f.session.replace_targets("127.0.0.1:080").unwrap();
+            f.session
+                .update_draft_options("1234", "1", vec![QuickFeature::TcpConnect])
+                .unwrap();
+            f
+        }
+        fn start(&mut self, backend: Arc<dyn QuickProbeBackend>, config: WorkerConfig) -> RunId {
+            // 매번 진단을 받은 적 없는 실제 새 CPU worker만 factory에서 반환한다.
+            self.session
+                .try_start_with(|| Ok(spawn(backend, config)))
+                .unwrap()
+        }
+        fn applied(&mut self, id: RunId) {
+            until(|| self.session.poll() == PollOutcome::Applied(id));
+        }
+        fn release_and_drain(&mut self) -> bool {
+            for gate in &self.releases {
+                gate.release();
+            }
+            if self.session.begin_close().is_err() {
+                self.cleanup_observed.store(false, Ordering::SeqCst);
+                return false;
+            }
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                self.session.poll();
+                if matches!(
+                    self.session.shutdown_state(),
+                    SessionShutdown::Closed | SessionShutdown::Failed
+                ) {
+                    self.cleanup_observed.store(true, Ordering::SeqCst);
+                    return true;
+                }
+                if Instant::now() >= deadline {
+                    self.cleanup_observed.store(false, Ordering::SeqCst);
+                    return false;
+                }
+                thread::yield_now();
+            }
+        }
+        fn close(&mut self) {
+            assert!(self.release_and_drain(), "세션 worker drain timeout");
+            assert_eq!(self.session.shutdown_state(), SessionShutdown::Closed);
+            assert_eq!(self.session.host_lifecycle(), Some(HostLifecycle::Closed));
+        }
+    }
+    impl Drop for SessionFixture {
+        fn drop(&mut self) {
+            let complete = self.release_and_drain();
+            if !complete && !thread::panicking() {
+                panic!("세션 fixture worker 정리 미완료");
+            }
+        }
+    }
+    fn assert_session_result(
+        session: &GuiRunSession,
+        snapshot: &RunSnapshot,
+        original: &RunResult,
+    ) {
+        let state = session.presenter().state();
+        assert_eq!(state.phase(), RunPhase::Finished);
+        assert_eq!(state.active_snapshot(), None);
+        assert_eq!(state.last_result(), Some(original));
+        assert_eq!(session.completed_snapshot(), Some(snapshot));
+        assert_eq!(session.host_lifecycle(), Some(HostLifecycle::Accepting));
+    }
+
+    #[test]
+    fn session_actual_core_result_and_snapshot_are_preserved_whole() {
+        let gate = Arc::new(Gate::default());
+        let backend = Arc::new(MemoryBackend {
+            gate: Some(gate.clone()),
+            ..Default::default()
+        });
+        let (config, observed) = capture();
+        let mut f = SessionFixture::new(vec![gate.clone()]);
+        let cleaned = f.cleanup_observed.clone();
+        f.session
+            .update_draft_options(
+                "1234",
+                "1",
+                vec![QuickFeature::TcpConnect, QuickFeature::LocalNetwork],
+            )
+            .unwrap();
+        let id = f.start(backend.clone(), config);
+        let snapshot = f
+            .session
+            .presenter()
+            .state()
+            .active_snapshot()
+            .unwrap()
+            .clone();
+        until(|| gate.entered.load(Ordering::SeqCst));
+        assert_eq!(f.session.poll(), PollOutcome::Idle);
+        assert!(observed.lock().unwrap().is_none());
+        gate.release();
+        f.applied(id);
+        // 별도 실행의 기대 DTO가 아니라 송신 직전 hook이 같은 실행에서 복사한 실제 결과다.
+        let original = observed.lock().unwrap().clone().unwrap();
+        let report = original.as_ref().unwrap();
+        assert_eq!(report.results.len(), 2);
+        assert!(!report.cancelled);
+        assert_eq!(
+            report.invocations,
+            ProbeCounts {
+                tcp_connect: 1,
+                local_network: 1,
+                ..Default::default()
+            }
+        );
+        assert_session_result(&f.session, &snapshot, &original);
+        let host_raw = backend.host_raw.lock().unwrap().clone().unwrap();
+        let host = report
+            .results
+            .iter()
+            .find(|r| r.feature == QuickFeature::LocalNetwork)
+            .unwrap();
+        assert_eq!(
+            host.details["raw_measurement"],
+            serde_json::to_value(host_raw).unwrap()
+        );
+        let before_close = f.session.presenter().clone();
+        f.close();
+        assert_eq!(f.session.presenter(), &before_close);
+        assert_eq!(f.session.completed_snapshot(), Some(&snapshot));
+        drop(f);
+        assert!(cleaned.load(Ordering::SeqCst));
+    }
+    #[test]
+    fn session_cpu_init_error_is_preserved_and_same_host_next_run_succeeds() {
+        let backend = Arc::new(MemoryBackend::default());
+        let builds = Arc::new(AtomicUsize::new(0));
+        let calls = builds.clone();
+        let (mut config, observed) = capture();
+        config.runtime_factory = Some(Arc::new(move || {
+            if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                Err(std::io::Error::other("RAW_CPU_INIT_MARKER"))
+            } else {
+                build_runtime(HostRuntimeMode::CpuOnlyPerRun)
+            }
+        }));
+        let mut f = SessionFixture::new(vec![]);
+        assert_eq!(f.session.host_lifecycle(), None);
+        assert_eq!(builds.load(Ordering::SeqCst), 0);
+        let first = f.start(backend.clone(), config);
+        let first_snapshot = f
+            .session
+            .presenter()
+            .state()
+            .active_snapshot()
+            .unwrap()
+            .clone();
+        f.applied(first);
+        let first_original = observed.lock().unwrap().clone().unwrap();
+        assert_eq!(
+            first_original,
+            Err(vec!["비동기 런타임 초기화에 실패했습니다.".into()])
+        );
+        assert_session_result(&f.session, &first_snapshot, &first_original);
+        assert_eq!(builds.load(Ordering::SeqCst), 1);
+        assert_eq!(backend.tcp_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(backend.icmp_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(backend.host_calls.load(Ordering::SeqCst), 0);
+        let next = f
+            .session
+            .try_start_with(|| panic!("기존 host를 재생성하면 안 됨"))
+            .unwrap();
+        assert_ne!(next, first);
+        let next_snapshot = f
+            .session
+            .presenter()
+            .state()
+            .active_snapshot()
+            .unwrap()
+            .clone();
+        f.applied(next);
+        let next_original = observed.lock().unwrap().clone().unwrap();
+        let report = next_original.as_ref().unwrap();
+        assert!(!report.cancelled);
+        assert_eq!(report.results.len(), 1);
+        assert_eq!(
+            report.invocations,
+            ProbeCounts {
+                tcp_connect: 1,
+                ..Default::default()
+            }
+        );
+        assert_session_result(&f.session, &next_snapshot, &next_original);
+        assert_eq!(builds.load(Ordering::SeqCst), 2);
+        assert_eq!(backend.tcp_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(backend.icmp_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(backend.host_calls.load(Ordering::SeqCst), 0);
+        let before_close = f.session.presenter().clone();
+        f.close();
+        assert_eq!(f.session.presenter(), &before_close);
+        assert_eq!(f.session.completed_snapshot(), Some(&next_snapshot));
+    }
+    #[test]
+    fn session_fixture_unwind_releases_pending_and_observes_worker_drain() {
+        let cleaned = Arc::new(AtomicBool::new(false));
+        let witness = cleaned.clone();
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            let gate = Arc::new(Gate::default());
+            let backend = Arc::new(MemoryBackend {
+                gate: Some(gate.clone()),
+                ..Default::default()
+            });
+            let mut f = SessionFixture::new(vec![gate.clone()]);
+            f.cleanup_observed = witness;
+            f.start(backend, WorkerConfig::default());
+            until(|| gate.entered.load(Ordering::SeqCst));
+            std::panic::panic_any("qg3e:delivery:pending-unwind-witness");
+        }));
+        let payload = result.expect_err("의도한 Pending 이후 unwind가 발생해야 함");
+        assert_eq!(
+            payload.downcast_ref::<&str>(),
+            Some(&"qg3e:delivery:pending-unwind-witness")
+        );
+        assert!(cleaned.load(Ordering::SeqCst));
+    }
+}
