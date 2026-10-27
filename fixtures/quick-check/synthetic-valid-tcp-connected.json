@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0",
+  "product": "network-quick-check",
+  "session_id": "synthetic-session-001",
+  "timestamp_iso8601": "2026-10-21T02:30:00Z",
+  "source_host": "synthetic-client-host",
+  "target_host": "127.0.0.1",
+  "resolved_ip": "127.0.0.1",
+  "target_port": 8080,
+  "feature": "tcp_connect",
+  "status": "PASS",
+  "elapsed_ms": 2,
+  "os_error_code": null,
+  "details": {
+    "outcome": "CONNECTED",
+    "limitations": [
+      "[합성(synthetic) 테스트 픽스처] 단위 검증용 데이터입니다.",
+      "OS 소켓 API 수준의 관찰 결과이며, 패킷 캡처 근거 없이 실제 SYN/RST 패킷 송수신이나 중간 차단 장비를 단정하지 않습니다.",
+      "TCP 연결 수립 여부만 확인하며 애플리케이션 페이로드는 0바이트 전송합니다."
+    ],
+    "raw_measurement": {
+      "target": "127.0.0.1:8080",
+      "outcome": "CONNECTED",
+      "local_address": "127.0.0.1:54321",
+      "elapsed_ms": 2,
+      "error_code": null,
+      "error_message": null,
+      "application_bytes_sent": 0,
+      "limitations": [
+        "[합성(synthetic) 테스트 픽스처] 단위 검증용 데이터입니다."
+      ]
+    }
+  },
+  "evidence_level": "OBSERVED"
+}

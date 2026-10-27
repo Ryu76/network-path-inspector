@@ -1,0 +1,16 @@
+"""QG1 최종 독립 QA의 실제 재현된 enum 형식 결함을 보존한다."""
+import datetime,hashlib,json,pathlib,re
+R=pathlib.Path(__file__).resolve().parents[1];now=datetime.datetime.now().astimezone().isoformat()
+def load(rel):return json.loads((R/rel).read_text(encoding='utf-8'))
+result=load('artifacts/commands/qg1-enum-before-fix.json');assert result['exit_code']==101
+text=(R/'artifacts/commands/qg1-enum-before-fix.log').read_text(encoding='utf-8');match=re.search(r'test result: FAILED\. (\d+) passed; (\d+) failed;',text);assert match and int(match[1])==5 and int(match[2])==3
+started=load('.harness/runs/qgenumfix-qgcore/started.json')
+record={'recorded_at':now,'delegation':'deleg_12592897','findings':[{'id':'QG1-ENUM-01','severity':'P2','path':'crates/network-core/src/quick.rs','line':'419-423,493-495','issue':'Quick enum fields accept externally-tagged object form contrary to JSON Schema string-only types','static_review_only_initially':True,'parent_execution_confirmed':True,'reproduction_evidence':'artifacts/commands/qg1-enum-before-fix.json','passed':5,'failed':3,'fields':['feature','status','evidence_level'],'examples':[{'feature':{'tcp_connect':None}},{'status':{'PASS':None}},{'evidence_level':{'OBSERVED':None}}],'status':'REPAIR_RUNNING'}],'other_confirmed_blockers':[],'gate_accepted':False,'correction':started,'source_sha256':hashlib.sha256((R/'crates/network-core/src/quick.rs').read_bytes()).hexdigest()}
+(R/'artifacts/qg1-independent-static-review.json').write_text(json.dumps(record,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+p=R/'artifacts/quick-check-progress.json';state=load('artifacts/quick-check-progress.json');state['recorded_at']=now;state['qg1'].update(status='STATIC_ENUM_TYPE_DEFECT_REPRODUCED_REPAIR_RUNNING',static_review_delegation='deleg_12592897',static_review_blocking_findings=1,enum_reproduction={'passed':5,'failed':3,'exit_code':101,'evidence':'qg1-enum-before-fix'},schema_checks={'passed':77,'failed':0,'evidence':'qg1-schema-enum-type-matrix'},correction_stage=started['stage'],correction_pid=started['pid'],accepted=False)
+state['remaining_blockers']=['QG1 enum文字열전용계약위반1건:부모독립3회귀실패, qgenumfix보정/감사/재시험대기','GUI/EXE/cleanVM/실VLAN/DROP/ICMP차단/성능 미검증'];p.write_text(json.dumps(state,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+section='\n## QG1 독립 정적 QA의 enum 형식 결함 — '+now+'\n- deleg_12592897 P2 QG1-ENUM-01: feature/status/evidence_level은JSONSchema문자열전용이지만serde unit enum객체형식({"PASS":null}등)을decode가수용. 부모독립회귀 qg1-enum-before-fix에서5PASS/3FAIL exit101로재현했다. 기존145/13/5등통과와무관하게QG1미수용.\n- qgcore 보존커밋6ba5093 이후 qgenumfix Flash High(pid'+str(started['pid'])+')가허용2파일만원자보정중. root는아직미수정. schema77/77은계약정의형식행렬이고Rustdecode보정통과증거가아님.\n- 수정완료후도구/경로/terminal/hash감사→정상문자열13값·비문자열15값회귀·독립8개재시험·선택반영·기존Inspector회귀/최종QA후만QG1판정. GUI다음게이트선행진행금지.\n\n'
+for name in ['PROGRESS.md','RESUME.md']:
+ p=R/name;text=p.read_text(encoding='utf-8');first,rest=text.split('\n',1);p.write_text(first+'\n'+section+rest,encoding='utf-8',newline='\n')
+p=R/'작업내용/NPI_2026-10-21_002.md';p.write_text(p.read_text(encoding='utf-8')+section,encoding='utf-8',newline='\n')
+print(json.dumps({'gate':'QG1','accepted':False,'confirmed_defects':1,'independent_failed':3,'correction_pid':started['pid']},ensure_ascii=False))

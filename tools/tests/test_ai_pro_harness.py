@@ -3,7 +3,7 @@ import importlib.util,json,os,pathlib,tempfile,unittest
 ROOT=pathlib.Path(__file__).resolve().parents[2]
 spec=importlib.util.spec_from_file_location('harness',ROOT/'tools/ai_pro_harness.py');h=importlib.util.module_from_spec(spec);spec.loader.exec_module(h)
 class HarnessTests(unittest.TestCase):
- def test_model_exact(self):self.assertEqual(h.MODEL,'gemini-4-argon-high')
+ def test_model_exact(self):self.assertEqual(h.MODEL,'gemini-3.8-flash-high')
  def test_nested_redaction_preserves_json_shape(self):
   old=h.VALUES
   try:

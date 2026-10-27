@@ -1,0 +1,148 @@
+# Network Quick Check 품질 게이트 계획 (QG0)
+
+## 1. 지원 OS 후보 매트릭스 및 제약
+- **사용자 지원 목표(2026-10-26 확대)**: Windows 10/11 및 Windows Server 2012 이후 전체 버전. 현재 표준 Rust MSVC 타깃의 Server 2016+ 요구와 구분하며, Server 2012/R2는 legacy 호환성 검토·실행 검증이 필요하다. 목표는 지원 보장이 아니다. 세부 근거는 `development-authorization-2026-10-26.md`, `windows-compatibility-review-2026-10-26.md`를 따른다.
+- **개발 시험 환경**: 현재 개발 시험은 Windows 10 (Build 19045) x64 단일 환경에서만 수행. ARM64는 현재 범위에서 보류.
+- **CRT 링크 한계**: CRT static 링크(`crt-static`)는 배포 검토 설정일 뿐 현재 무설치 성공을 의미하지 않으며 OS 필수 DLL은 여전히 동적 연결됨.
+
+## 2. 게이트별 수용 기준 및 검증 계획 (설계/부분 수용과 전체 제품 수용 구분)
+| Gate | 검증 목표 | 수용 기준 (계획) | 현재 상태 |
+|---|---|---|---|
+| **QG0** | 설계 및 범위 확정 | 후보 OS 합의, 위협 모델, 계약 상대경로 정합성 검토, **무설치·무관리자 기본 경로 검증 계획 승인** (비상승 일반 사용자 토큰 시험 계획, 권한 제한 시 명확한 안내와 기본 TCP 유지, PE manifest `asInvoker` 검토 및 상승 부모 실행 격리 사례 정의) | 설계·시험계획 한정 수용, 실제 일반사용자/OS 실행은 별도 미검증 |
+| **QG1** | 코어 facade 추출 | `network-core` facade 분리 및 계약 스키마 검증, 기존 Inspector 회귀 | 공유 Core/DTO 계약 수용, GUI·배포 제품 수용 아님 |
+| **QG2** | 프로브 검증 | 정상/거부/DROP/DNS 실패/ICMP 차단/IPv6 단위 검증 (루프백으로 DROP/차단 대체 불가, 공유 변경 회귀 필수) | 공유 프로브·개발보조 TCP 앱 경로 부분 수용, 실환경 전체 QG2 미수용 |
+| **QG3** | Win32 GUI 연동 | UI 비차단(I/O 0), 비선택 기능 0회 실행, 다중 대상(최대 100건 붙여넣기/추가/삭제/중복제거) 관리 검증 | 미검증 계획 (GUI 미구현) |
+| **QG4** | 동시성 및 취소/자원 수명주기 | 최대 100 대상 입력 및 동시 4 설정 검증, 결과 메모리/큐 상한(설계 제안치, 한도 시 명시 상태 기록 및 조용한 삭제 금지), 대상별 결과 격리(IP/port/session 연계 오염 방지), 취소 및 앱 종료 시 핸들/프로세스/소켓 회수, 명령 Traceroute 숨김창·타임아웃·파싱실패·자식종료, IPC 상한 및 부분결과 중단 표시, ICMP 동기 2초 블로킹 한계 및 엄격 취소시간 미보장 유지 | 미검증 계획 |
+| **QG5** | 결과 필터 및 내보내기 무결성 | 전체/성공/실패/경고 및 기능별/대상별 필터링, UTF-8 인코딩, 설정·대상·출발지/목적지·시각(시간대)·프로그램 버전 메타데이터 정확성, CSV 수식 주입 방어(`=`, `+`, `-`, `@`), 원자적 쓰기(임시파일->flush/sync->원자적 교체), 개인정보 안내 | 미검증 계획 |
+| **QG6** | 단일 EXE 무설치 | 깨끗한 Windows 10/11/Server VM에서 추가 런타임/설치 없이 실행하고 PE 바이너리의 import/manifest를 별도 검사 (실제 OS 검증 필요; Windows PE 지원 요구 아님) | 미검증 계획 |
+| **QG7** | 성능 실측 보고서 및 통합 회귀 | PRD 20.1 실제 측정 보고서 필수(EXE 10MB, 유휴 메모리 30MB/CPU 1% 5분, 초기화면 1초 30회, TCP 3000ms DROP, 100 대상 UI 응답, 취소/종료 자원 회수 - 전부 목표치이며 미실측, 하드웨어/OS 조건 고정, P50/P95/최대/로그 기록, 목표 초과 시 미충족·예외승인), Inspector/Quick 동일 조건 TCP 분류 동등성 및 양방향 회귀 (두 게이트/두 제품 완료 혼동 금지) | 미검증 계획 |
+
+## 3. 세부 품질 게이트 검증 계획 (독립 QA 확정 사항)
+
+### 3.1 QG0: 무설치·무관리자 기본 경로 검증 계획 (수용 조건)
+- **비상승 일반 사용자 토큰 시험 계획**:
+  - 표준 비상승 일반 사용자 토큰 환경에서 실행하여 TCP Connect, Ping, DNS 조회, 로컬 네트워크 정보 조회, ICMP Traceroute 기본 검사를 수행하는 시험 계획을 수립함.
+  - 권한 부족이나 OS 정책에 의해 특정 기능이 제한될 경우 프로그램 크래시나 무단 권한 상승 시도 없이 `status=UNKNOWN` 및 `details.outcome=UNAVAILABLE` 등 제한 사유를 사용자에게 안내하고 (`UNAVAILABLE`를 Quick 최상위 상태로 추가하지 않음), 관리자 권한이 불필요한 기본 TCP 연결 기능은 정상 유지함을 검증 계획에 포함함.
+  - PE manifest 검토 계획: 바이너리에 `<requestedExecutionLevel level="asInvoker" uiAccess="false"/>` 선언 여부를 검토하는 정적 분석 절차 수립.
+- **상승 부모 프로세스 상속 격리 사례**:
+  - `asInvoker`는 실행을 요청한 부모 프로세스의 토큰을 그대로 상속하므로, 관리자 권한 명령 프롬프트나 파워셸에서 실행 시 자동으로 일반 사용자로 강등되지 않음.
+  - 따라서 "상승된 부모 프로세스에서 기동된 경우"를 별도 시험 사례로 분리 정의함. 이 경우에도 상속된 높은 권한을 악용하여 OS 정책, 방화벽 규칙, 라우팅 테이블, 레지스트리, 인증서 저장소를 변경하지 않는지 검증 계획에 명시함.
+- **설계·시험계획 승인 상태**:
+  - QG0 설계·시험계획 범위만 수용되었다. 실제 비상승 일반사용자·지원 OS·무설치 실행 검증은 별도로 미완료다.
+
+### 3.2 QG4: 동시성, 부하 한계 및 자원 수명주기 검증 계획
+- **입력 규모 및 동시성 검증**:
+  - 최대 100건 대상 입력 및 동시 4 검사 제어 검증 계획 수립. 사용자 정의 동시성 설정 시에도 최대 상한 4를 초과할 수 없도록 강제함.
+- **결과 메모리 및 큐 상한 통제**:
+  - 메모리 및 결과 큐 상한 수치(예: 100 대상, 화면 뷰포트 버퍼 등)는 **설계 제안치(Proposal)**임을 명시함.
+  - 한도 도달 시 `LIMIT_REACHED` 등 명시적 상태 코드를 기록하고, 원본 데이터를 사용자 고지 없이 조용히 삭제(silent drop)하는 행위를 엄격히 금지함.
+- **대상별 결과 격리**:
+  - 다중 대상 동시 실행 시 대상 IP, 대상 포트, 세션 식별자를 엄격히 연계하여 대상 간 결과 데이터 오염 및 매핑 혼선을 방지하는 격리 검증을 수행함.
+- **수명주기 및 자원 회수 검증**:
+  - 사용자 중간 취소('중지') 및 앱 종료(정상 종료 및 강제 종료 시그널) 상황 모두에서 열린 소켓, 자식 프로세스, 스레드 핸들이 누수 없이 운영체제로 회수되는지 검증함.
+- **명령 기반 Traceroute 채택 시 필수 검증 계획**:
+  - 외부 명령어(예: Windows tracert) 기반 구현 채택 시 숨김 창(`CREATE_NO_WINDOW`) 실행, 엄격한 실행 타임아웃, 비표준 출력 파싱 실패 시 예외 처리, 상위 프로세스 취소 시 자식 프로세스 강제 종료(Job Object 연동 또는 TerminateProcess)를 필수 시험 항목으로 규정함.
+  - 자식 프로세스 IPC 및 출력 버퍼 상한을 설정하고, 취소 시 부분 결과를 '중단됨(`CANCELLED`/`UNKNOWN`)'으로 명시 표기함.
+- **기술적 한계 유지**:
+  - ICMP 동기 API(IcmpSendEcho 등) 호출 시 OS 수준에서 최대 2초 블로킹될 수 있는 한계와 소켓 취소 시 밀리초 단위의 엄격한 즉시 취소가 보장되지 않는 기술적 제약을 유지함.
+
+### 3.3 QG7: 성능 실측 보고서 및 통합 회귀 검증 계획
+- **PRD 20.1 성능 지표 실측 보고서 요구**:
+  - 아래 지표는 모두 설계 목표 예산(Budget)이며 현재 **미실측** 상태임. QG7 통과를 위해서는 실제 측정 보고서 제출이 필수적임.
+    1. **EXE 크기**: Release 단일 EXE 10MB 이하 목표 (빌드 산출물 크기 측정).
+    2. **유휴 자원**: 유휴 메모리 30MB 이하, 유휴 CPU 평균 1% 이하 목표 (작업 관리자 및 Windows 성능 카운터 기준 5분간 안정화 상태 측정).
+    3. **초기 화면 표시**: 콜드 스타트 1초 이내 목표 (반복 30회 측정).
+    4. **TCP 기본 타임아웃**: 3000ms 목표 (실제 네트워크 패킷 DROP 환경에서 검증).
+    5. **UI 반응성**: 100개 대상 검사 진행 중 UI 멈춤 없이 조작 가능 목표.
+    6. **잔여 자원**: 검사 취소 및 앱 종료 후 핸들, 프로세스, 소켓 누수 0건 목표.
+  - **실측 원칙**: 테스트 장비의 하드웨어 사양, OS 빌드, 측정 조건을 고정하고 P50, P95, 최대치 및 원본 측정 로그를 보고서에 첨부해야 함. 목표치 초과 시 임의로 기준을 완화하거나 통과 처리할 수 없으며, 미충족 상태로 기록하고 근거 있는 예외 승인을 받아야 함.
+- **판정 동등성 및 양방향 회귀 검증**:
+  - 동일한 입력 조건(동일 대상 IP, 포트, 타임아웃)에서 Quick Check와 Network Path Inspector를 실행하여 TCP 연결 결과 분류(Connected, Refused, TimedOut, Unreachable 등)의 동등성을 검증함.
+  - 공통 `network-core` 라이브러리 수정 시 Inspector와 Quick Check 양방향 전체 회귀 테스트를 통과해야 함.
+  - Quick Check QG7 통과를 Inspector 전체 개발 완료(G7/G8)로 혼동하거나 치환하지 않음.
+
+## 4. PRD 23 통합 수용 시험 시나리오 계획표
+PRD 23절에 정의된 통합 수용 시나리오를 Quick Check 품질 게이트별 검증 계획표로 배정함.
+
+| 시나리오 ID | 시나리오 내용 | PRD 절 | 담당 게이트 | 기대 결과 (계획) | 검증 증거 (계획) | 환경 미확보 시 (Blocked) 조건 |
+|---|---|---|---|---|---|---|
+| **INT-01** | 승인 시험 환경 2 VLAN 허용/거부/DROP | PRD 23.1 | **QG2** (프로브 분류)<br>**QG7** (통합 회귀) | 허용 시 CONNECTED(PASS/OBSERVED), 거부 시 REFUSED(FAIL/OBSERVED), DROP 시 TIMED_OUT(FAIL/OBSERVED) 정확 분류 및 원시 OS 오류코드 보존 | 프로브 결과 JSON, 원본 소켓 오류코드, 소요시간(ms) 로그 | 2개 VLAN 격리 시험망 또는 방화벽 DROP/거부 정책 테스트베드 미확보 시 `blocked` |
+| **INT-02** | localhost / 실서버 / 다른 VLAN 대조 | PRD 23.2 | **QG2** (프로브 분류)<br>**QG7** (대조 검증) | 로컬 루프백(127.0.0.1), 동일 서브넷 실제 서버, 원격 다른 VLAN 대상 검사 결과를 상호 대조하여 경로/지연/오류 차이를 정확히 기록 | 3개 대상별 소요시간(ms), 출발지/목적지 정보, 상태 대조 로그 | 승인된 원격 실서버 및 다른 VLAN 테스트베드 미확보 시 `blocked` |
+| **INT-03** | 도메인 다중 IP 결과와 선택 접속 IP 보존 | PRD 23.3 | **QG2** (DNS 해석)<br>**QG3** (UI 표기) | 다중 A/AAAA 레코드를 가진 도메인 해석 시 해석된 전체 IP 목록을 보존하고, 실제 TCP 연결에 사용된 선택 접속 IP를 식별하여 분리 기록 | 전체 해석 IP 배열, 실제 연결 시도 IP, 세션 로그 파일 | 다중 IP 반환 도메인 또는 모의 DNS 테스트베드 미확보 시 `blocked` |
+| **INT-04** | IPv6 대상 검사 | PRD 23.3 | **QG2** (프로브 검증) | IPv6 주소(`[::1]` 또는 글로벌 유니캐스트) 입력 시 올바른 구문 해석, TCP Connect 및 Ping 정상 수행, IPv6 미지원 환경에서는 OS 오류코드 명시 | IPv6 소켓 연결 결과, ping 왕복시간, 오류 로그 | IPv6 네트워크 스택 또는 라우팅 미지원 환경 시 `blocked` |
+| **INT-05** | DNS 해석 실패 | PRD 23.3 | **QG2** (DNS 오류 분류) | 존재하지 않거나 응답 없는 도메인 입력 시 DNS_ERROR(FAIL/OBSERVED)로 정확히 분류, 원시 OS 오류코드 보존, 프로그램 비정상 종료 없음 | DNS 오류 반환 DTO, UI 오류 메시지 로그 | 격리 테스트베드 내 DNS 실패 모의 환경 미구성 시 `blocked` |
+| **INT-06** | 다중 NIC 환경 | PRD 23.3 | **QG2** (로컬 네트워크 정보) | 여러 NIC 장착 시 활성 어댑터 목록, IP, 게이트웨이, 라우팅 우선순위를 정확히 수집하고 대상 접속 시 선택된 인터페이스 정보 명시 | 어댑터 목록 덤프, 선택된 출발지 인터페이스 로깅 | 2개 이상의 물리/가상 NIC를 가진 테스트베드 미확보 시 `blocked` |
+| **INT-07** | VPN 환경 검사 | PRD 23.3 | **QG2** (프로브/라우트)<br>**QG7** (환경 통합) | VPN 활성화 상태에서 경로 변화 감지, 가상 어댑터를 통한 통신 시도 시 라우팅 정보 및 연결 결과 정상 수집 | VPN 가상 인터페이스 식별 로그, 터널 경유 TCP 측정 결과 | 승인된 테스트 VPN 연결 환경 미확보 시 `blocked` |
+| **INT-08** | 잘못된 포트 및 유효하지 않은 입력 | PRD 23.3 | **QG2** (프로브 오류)<br>**QG3** (입력 검증) | 포트 0, 65536, 음수, 문자열 등 비정상 입력 시 사전 차단 및 사용자 안내; 미청취 포트 연결 시 REFUSED 또는 TIMED_OUT 정상 처리 | 입력 유효성 검사 실패 로그, 거부 소켓 오류코드 | Win32 GUI 입력 폼 미구현 상태이므로 현재 `blocked` |
+| **INT-09** | 네트워크 단절 중 앱 생존 및 결과 저장 | PRD 23.5 | **QG4** (예외 격리)<br>**QG5** (저장 무결성) | 검사 진행 중 네트워크 단절(케이블 분리/어댑터 비활성화) 발생 시 크래시 없이 UNREACHABLE 또는 LOCAL_ERROR 처리, 기존 결과의 원자적 TXT/CSV 저장 보장 | 네트워크 단절 이벤트 후 결과 저장 파일, 프로세스 생존 로그 | 네트워크 어댑터 상태 강제 단절 시험베드 미확보 시 `blocked` |
+| **INT-10** | 동일 TCP 입력 Inspector 판정 동등성 | PRD 23.4 | **QG7** (양방향 회귀) | 동일 원시 측정 재생에서는 양 제품의 TCP 분류와 원본 오류코드 보존을 정확히 대조. 실제 순차 실행에서는 동일 목적지 IP/포트/타임아웃과 관측 조건을 기록하고 차이가 있으면 원인을 조사하며, 시점이 다른 OS 결과의 무조건 일치를 가정하지 않음 | 양 제품 실행 결과 JSON/로그 비교 표, 판정 일치율 분석서 | Inspector 최신 빌드 또는 동시 실행 시험베드 미확보 시 `blocked` |
+
+## 5. 검증 원칙 및 안전 통제
+- **대체 금지**: 로컬 127.0.0.1 루프백 시험 결과로 실제 DROP, ICMP 차단, 실제 2개 VLAN 환경, 클린 VM 검증 등의 미검증(`blocked`) 항목을 통과 처리하지 않음.
+- **운영망 접속 금지**: PRD 문서에 기재된 IP 예시(192.168.* 등)는 문서 작성용 예시일 뿐 실제 테스트 승인이 아님. 사용자가 명시적으로 승인한 시험 대상 외의 임의 운영망/서브넷 접속을 엄격히 금지함.
+- **운영 무변경 원칙**: 운영망, 운영 DB 인증/SQL 쿼리 실행, OS 정책, 방화벽 규칙, 라우팅 테이블, 레지스트리, 인증서 저장소 변경, Npcap/드라이버/서비스 설치, 관리자 권한 상승 시도 일체를 금지함.
+- **공유 회귀 통제**: Inspector G0~G8과 Quick Check QG0~QG7의 진행 단계를 혼동하지 않으며, 공통 `network-core` 수정 시 상호 회귀 검증을 필수로 수행함.
+- **참조 문서**: [인터페이스 계약](../../contracts/quick-check-interface-v0.1.json), [아키텍처](architecture.md), [설계 결정 기록](decisions.md), [위협 모델](threat-model.md), [요구사항 추적성 매트릭스](requirement-traceability.md), [PRD v1.2](../requirements/Network_Path_Inspector_Harness_PRD_v1.2.md).
+
+## 후속 QG0 설계 검토 판정
+- 2026-10-21T11:53:32.980216+09:00: 독립 재검토 `deleg_149f9737`에서 문서 누락4건 해소/추가확정P1 없음. 부모 감독자가 **로컬 개발 설계·시험계획 범위만 수용**했다. 위의 제안/검토대기는 최초 작성 시점이며 후속 판정 근거는 `artifacts/qg0-design-acceptance.json`이다.
+- 실제 일반사용자 실행·지원OS·단일EXE/VM·성능과 QG1 이후 기능 수용은 별개로 미검증이다. 운영 설정 변경 권한을 부여하지 않는다. CRT 정적링크는 여전히 검토 설정이다.
+
+## QG1 후속 수용 판정
+- 2026-10-21T12:20:11.599115+09:00: 공유 Core facade와 Quick DTO/JSON 계약 범위만 수용. 독립 QA 결함은 실행 재현→보정→독립 재검토로 해소. 근거 `artifacts/qg1-acceptance.json`. 기존 표의 root미통합/검증중은 당시 기록이며 현재의 QG1 판정은 이 기록을 따른다.
+- GUI/EXE·무설치·지원 OS·QG2 이후 기능 및 실제 VLAN/DROP 시험 완료를 의미하지 않는다.
+
+## 선택 ICMP Trace 실행기 root 조합회귀·제한 범위 수용 — 2026-10-22T15:20:15.712288+09:00
+- 최종독립재QA deleg_45855748 두검토자 findings=[]·원문/성공단언/실제resolve목적지guard·직접ctxport/순차조회·Notify Pending취소·예산fixture 모두해소확인. 부모동일sourceSHA재계산후runner source/tests 정확2파일만root선택통합했다. manifest/lock/lib·기존DNS/Trace엔진불변.
+- root workspace 415PASS/0FAIL/22ignored; 별도명시native 22PASS/0FAIL; 독립Trace경계14/DNS경계6PASS; strictClippy/fmt exit0. 22 native에는새runner5가포함되고경계suite도별도이므로합산제품인증률로표현하지않음. Inspector보호61파일SHA불변.
+- 수용은선택Trace연결+기존DNS실행정책보존범위만. Trace미선택호출0·domain첫검증IP만·IP상세DNS독립·raw/canonical무보정·실측IPnonnull·OS코드None/원시exit구분·완료DNS와진행중await/drain/보관한도유지. Notify취소는합성future증거이지실제OS프로세스취소인증아님.
+- source보존local commit 613d07da26aecb0a06d7c43da56120ef8135aa05, 전용worktree clean. root는기존작업을그대로보존해dirty일수있으며전체branch merge/원격push/배포없음. acceptance artifact: artifacts/qg2e-trace-runner-acceptance.json. 이전DNS수용source는역사로보존하고최신동일DNS정책근거는이수용을참조한다.
+- 전체QG2는승인실VLAN/DROP/ICMP차단·다중NIC/VPN등환경검증부재로미수용. 제품동일EXE resolver dispatch/Win32GUI/TXT·CSV/PE·서명/VM·일반사용자/성능과Inspector전체G2미완료.
+
+
+## 제품 동일 EXE DNS worker 진입점 root 조합회귀·제한 범위 수용 — 2026-10-22T16:26:35.728972+09:00
+- deleg_c26f9c10 최종두정적QA 모두findings=[]·기존7종해소. 부모가최종4appSHA/전용worktree clean/실제순수12·CLI38·소유localhost IPC1/기존lock24패키지전체불변을확인한뒤app4+workspace/lock2만root선택통합했다. Core/resolver/Inspector소스변경0·Inspector보호61SHA불변.
+- root workspace427PASS/23ignored;명시native23PASS/0ignored;Trace경계14/DNS경계6PASS;strictClippy/fmt exit0. 고정root제품EXE의명령행38PASS와부모boundedChild감독기6PASS도다시실행했다. native23은기존22+새제품worker IPC1이며app12는427에포함·서로합산하지않음.
+- 수용은엄격worker selector/arity/원본host·port사전검증/거부원문비반사/단일JSON·16384byte/write·flush실패/현재EXE backend factory/동일제품EXE localhost IPC만. noargs/help는정적stderr안내만하며진단을자동실행하지않는다. factory만으로명시진단run_quick종단경로가구현됐다고주장하지않음.
+- 부모QA증거수집첫시도는잘린human transcript본문JSON파싱오류로root수정전중단했다. 완전한async최종응답에서정규화한판정과잘린transcriptSHA/완료prefix를구분해보존·복구했으며제품실패/QA미수신을성공으로위장하지않았다. artifacts/qg2f-app-entry-final-review-delivery.json 참조.
+- source보존local commit a04f9da59a6875d4fc4a1f7d6f162bce6b83168f;root는기존미커밋변경보존·전체branch merge/원격push/배포없음. artifacts/qg2f-app-entry-acceptance.json. 전체QG2실VLAN/DROP/ICMP차단·다중NIC/VPN미수용,GUI/QG3/명시진단시작경로/TXT·CSV/Release/PE/CRT/서명/VM·일반사용자/성능미완료. debug EXE는worker기반확인용이며배포용진단제품이아니다.
+
+
+## 승인된 TCP 공개변경·양제품 실제 projector 순수 replay root 제한 수용 — 2026-10-23T10:56:57.010993+09:00
+- 사용자명시「허용」범위대로Inspector apply_tcp_result에pub 4바이트만추가·함수본문/상태/오류/측정동작완전불변. root원본보호60SHA불변+승인된engine1개가시성예외를별도기록했고원래보호baseline61목록/해시는수정하지않았다. 기존61불변은이전시점이며최신판정은60+1승인delta다.
+- Flash test1파일작성·부모기대문구정정/실제중복·nullablemeta/모든matrix raw/OScode/duration/stale/불변성보강·동일source실행을거쳤다. 가시성QA deleg_6b0609ec 및최종test QA deleg_fa9790f8 두검토모두findings=[]·실제두함수호출/독립기대값/제품별차이무보정/순수성확인. QA요청뒤doc공백한줄차이는역SHA증명·실행코드/단언변경0.
+- root workspace433PASS/23ignored·명시native23PASS/0ignored·Trace경계14/DNS경계6PASS·strictClippy/fmt exit0. 고정root제품EXE CLI38PASS·bounded감독기6PASS도재실행. 새replay6은433에포함되며native수추가0·서로합산하지않음. 함수공개전E0603와최초5PASS1FAIL/Clippy101증거는보존했다.
+- 제품코드/시험은engine와새replay시험2파일만선택통합·Cargo/lock/계약/worker source불변. 보존local commit 6ce05a322823659b53df6d5a6032ee6673dcd692·전용worktree clean;root는기존미커밋작업보존·원격push/배포/전체branch merge없음. artifacts/qg2g-tcp-replay-acceptance.json.
+- 수용은같은원시DTO→양실제projector의순수characterization과승인된public접근만. CANCELLED/LOCAL_ERROR/DNS_ERROR/unknown의기존제품별차이를그대로명시하며실제순차TCP결과일치/패킷관측/EngineEnvelope·Archive·Session저장검증으로승격하지않는다. PRD23.4보조순수근거이지전체통합수용아님.
+- 전체QG2실환경·GUI/QG3·제품진단시작경로/TXT·CSV/Release/PE/CRT/서명/VM·일반사용자/OS지원/성능미완료. 이전worker기반과공용resolver/Trace정책수용은불변으로유지했다.
+
+
+## 소유 IPv4/IPv6 양제품 실제 TCP 비교 root 제한 수용 — 2026-10-23T12:44:22.467960+09:00
+- 최종독립QA deleg_5a10ae9f 두검토모두findings=[]·실행안전true·초기F1~F4해소/기존3000ms입력채택은판정정규화나제품성능목표완화아님을확인. 부모고정SHA e926cb55d672b81d655160d9d4330a651877528d4de42eb82df34a9c84720f5c source로실행/원문증거대조후새test1파일만root선택통합했다. production/기존test/manifest/lock변경0.
+- root 기본회귀434PASS/27ignored·명시native27PASS/0ignored(기존23+새IPv4/IPv6성공/거부4)·Trace경계14/DNS경계6PASS·strictClippy/fmt exit0. 실제root제품EXE CLI38PASS·bounded감독기6PASS도재검증. 새pure1은434에포함·새native4는27에포함·합산통계로과장하지않음.
+- 실제run_profile메모리EngineEnvelope의TCPraw와실제run_quick/native결과를각자기대값/귀속/OS원문/nullable/전체raw에대조·같은Inspectorraw→실제Quickprojector replay는별도정확동등축. 성공각acceptpeer·실제EOF/수신애플리케이션바이트0관찰. 다른native시점elapsed/clientport전체의동일/상이조건요구0·TCP외프로브0. Archive/정규Session/패킷/서비스정상인증아님.
+- 초기직렬화byte오판4FAIL→전체JSON값동등성수정뒤1000ms2PASS2FAIL(TIMED_OUT)→제품기존기본입력3000ms4PASS의실패/특성규명기록을보존했다. 이후F2~F4추가강화동일SHA로W/root모두재실행. 1000ms거부조건통과를주장하지않고3000ms의DROP성능시험으로치환하지도않는다. bound/nonlisten은독점예약/모든race제거보장아님.
+- Inspector원본60SHA+기승인pub4byte1예외불변·원래baseline61해시목록미수정. Wclean/보존localcommit 8e9d76fedafe3645e89631acf7fe0baef0a159ae·root기존미커밋변경보존·원격push/배포/전체branch merge없음. artifacts/qg2h-tcp-native-acceptance.json.
+- 전체QG2실VLAN/DROP/ICMP차단/다중NIC/VPN·제품EXE명시진단시작/GUI/QG3이후·Release/PE/CRT/서명/VM·일반사용자/OS지원/성능미완료. timestamp/source_host는이번null입력범위만·connect_once반환직전DTO별도capture/OS즉시회수인증아님.
+
+## 명시 개발용 단일 TCP 진단 경로 root 제한 수용 — 2026-10-23T16:52:12.696083+09:00
+- `--dev-tcp-once-v1 HOST PORT`를 지정했을 때만 제품 EXE가 기존 `run_quick` 및 현재 EXE DNS backend factory를 소비한다. 단일 대상·TCP만·기존 3000ms·동시성1·도메인의 필수 해석만이다. GUI/일반 사용자 기본 UX 또는 P1 JSON 파일 내보내기 기능이 아니다. 기존 noargs/help/invalid/worker의 자동 진단0과 worker 16384byte 계약은 그대로다.
+- 최종 독립 QA `deleg_62debd02` 두 건 추가지적0 뒤 부모가 같은 SHA를 검증·선택 통합했다. root 기본회귀446PASS/31ignored, 명시 native31PASS/0ignored(기존27+새 실제 제품 EXE IPv4/IPv6 성공·거부4), 기존 CLI38PASS, 새 인자거부23PASS, 감독기6PASS, Trace경계14/DNS경계6PASS, strict Clippy/fmt exit0. 하네스29PASS는 별도다. 새 기본시험12는446에 포함되며 통계를 합산하지 않는다.
+- JSON은 기존 `QuickRunReport` 전체 compact 한 줄+LF이고 전체 wire65536byte를 직렬화 도중 제한한다(result 보관 한도32768과 별도). exit0은 report 전달 완료이지 TCP 성공 뜻이 아니며 거부도 report의 FAIL/10061로 남는다. exit1은 출력/local/report errors/limit, exit2는 사전 인자거부, exit3은 오류 없는 취소 report 전달이다. 출력/local 오류가 취소보다 우선한다. timestamp/source_host는 null이며 정상 시각 메타데이터 전체 요구를 충족했다고 주장하지 않는다.
+- 실제 성공은 소유 listener의 EOF·수신 application bytes0·accept peer와 raw local endpoint 귀속을 확인했다. 거부는 살아 있는 bound/nonlisten 포트를 유지해 실제 REFUSED10061을 요구한다. 독점예약/모든 race 제거/패킷부재/서비스정상/DB로그인 증거가 아니다. default 앱시험은 mock/메모리·I/O/time driver 없는 CPU runtime만 사용한다.
+- 초기 E0382/E0560, lock guard, 불완전 빌드 timeout, 부모 bool API 오류, DNS fixture host 불일치22PASS1FAIL, 첫 Clippy101은 보존했다. 부모가 bounded writer·생산 공유 dispatcher·실제/모의 공유 취소 감독·동일Arc/Pending/drain/전체raw witness·Trace 실카운터·비동기 Child 감독을 보강했다. 기존 registry package identity/checksum은 유지하고 lock에 bytes1.11.1(dev process), errno0.3.14/signal-hook-registry1.4.8을 추가했다. Release normal graph/배포 인증은 아직 하지 않았다.
+- Inspector 원본60SHA+기승인pub4byte1예외 불변·baseline61 원본 미수정. 공유 Core/resolver/Inspector 새 변경0. source3+부모 metadata2만 통합했다. Wclean/로컬 보존commit `91066f37e8d9a1e44f3d5b71b2c30b4ea7d81a7a`·원격 push/배포/전체 branch merge 없음. 근거 `artifacts/qg2i-explicit-tcp-acceptance.json`.
+- 전체QG2 실환경·실제 domain→동일EXE worker→TCP·실Console Ctrl+C/Break 전달·전역 handler 원복·OS 즉시회수·다중대상취소·GUI/QG3~7·Release/PE/CRT/서명/VM·일반사용자/OS지원/성능은 미수용이다. 모의 취소와 kill_on_drop을 이 인증으로 치환하지 않는다.
+
+## GUI 순수 입력·실행 상태모델 root 제한 수용 — 2026-10-26T10:06:07.370825+09:00
+- 사용자 GUI 병행 승인 아래 대상목록/옵션/실행스냅샷/취소요청/완료ID귀속 상태모델 source3만 메인에 선택통합했다. 실제Core parser/plan/request/report재사용·기존CLI분기/worker/공유Core/resolver/Inspector/manifest/lock변경0. Win32화면이나runner연결완료가아니다.
+- 최종독립QA deleg_a604a8b4 두검토 모두 findings=[]·원본QA01~06해소. root workspace477PASS/0FAIL/31ignored, 새focused23개는그합계에포함. strictClippy/fmt0·하네스32PASS. 초기15PASS1FAIL/unused경고와개행준비차단을보존했다. 실제native/제품EXE CLI는이번재실행0·이전native31은역사근거다.
+- Wclean/로컬보존commit db1e57128dd5f3cbfaabd22b273d6585026a838a. Flash초안+부모시험보강 공동작성·생산은actor원문의정확rustfmt출력과byte동일. Inspector원본60+기승인pub4byte예외1·baseline61원본유지·원격push/배포/전체branch merge0.
+- 근거 artifacts/qg3a-gui-state-acceptance.json. 전체QG2/전체QG3/제품수용false. 다음은네이티브Win32화면과별도실행coordinator의bounded전달/창종료수명주기연결이며, GUI스레드IO0·기존CLI계약보존을유지한다. 구형Windows2012/R2/OS별실환경·Release/단일EXE/성능/배포는별도미검증이다.
+
+## QG5A 순수 결과표시·필터·TXT/CSV 메모리 변환 root 제한 수용 — 2026-10-26T16:43:41.565510+09:00
+- result_view.rs/result_export.rs와lib의public모듈선언2개만메인선택통합했다. 미수용QG3B실창소스/설정·coordinator는통합0,기존entry분기/worker/CLI/Core/manifest/lock변경0. 실제저장/clipboard/실GUI연결완료아니다.
+- 독립최종 deleg_493912d0 A findings[]/B차단0·원본QA-01~04해소. B의LOW QA-B-01은부모quote-all wire검사와값은동일한unquoted변이4개거부회귀1시험추가로보강,그뒤생산변경0·전체재회귀.
+- **메인root 492PASS0FAIL31ignored**,순수모듈15개포함;strictClippy/fmt0. qgresults W는515PASS0FAIL35ignored이며root와서로다른조합이다. focused17은기존state2와겹쳐합산금지. 하네스39PASS,실제native/제품EXE CLI이번재실행0.
+- Wclean 로컬commit **5ccf93feb3cdd1028571a2f835f5c72f7e9c5f6f**. Flash초안+부모시험/검증보강공동작성. Inspector원본60·기승인pub4byte예외1 유지. 이전root60manifest는재생성하지않고lib선언예외·신규2source를 artifacts/qg5a-root-baseline-delta.json에따로고정했다. 기존dirtyroot의그외변경보존·원격push/배포/전체branchmerge0.
+- 근거 artifacts/qg5a-pure-result-acceptance.json. 단독QG5A순수범위만acceptedtrue,전체QG2/QG3/QG5/GUI/OS/제품false. coordinator수정원본compile101·실행0이며안전QA deleg_bede6d65회수후별도보정한다.

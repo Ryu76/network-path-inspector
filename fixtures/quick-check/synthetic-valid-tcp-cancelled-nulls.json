@@ -1,0 +1,34 @@
+{
+  "schema_version": "1.0",
+  "product": "network-quick-check",
+  "session_id": "synthetic-session-002",
+  "timestamp_iso8601": null,
+  "source_host": null,
+  "target_host": "unknown-host.local",
+  "resolved_ip": null,
+  "target_port": 1526,
+  "feature": "tcp_connect",
+  "status": "UNKNOWN",
+  "elapsed_ms": null,
+  "os_error_code": null,
+  "details": {
+    "outcome": "CANCELLED",
+    "limitations": [
+      "[합성(synthetic) 테스트 픽스처] 단위 검증용 데이터입니다.",
+      "사용자 취소 요청으로 TCP 연결 시도가 중단되었습니다."
+    ],
+    "raw_measurement": {
+      "target": "unknown-host.local:1526",
+      "outcome": "CANCELLED",
+      "local_address": null,
+      "elapsed_ms": 15,
+      "error_code": null,
+      "error_message": "사용자 취소 요청으로 TCP 연결 시도가 중단되었습니다.",
+      "application_bytes_sent": 0,
+      "limitations": [
+        "[합성(synthetic) 테스트 픽스처] 단위 검증용 데이터입니다."
+      ]
+    }
+  },
+  "evidence_level": "UNKNOWN"
+}

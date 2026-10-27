@@ -1,0 +1,13 @@
+{
+  "version": 2,
+  "scope": "Network Path Inspector project AI Pro only",
+  "requested_priority": ["Gemini 4 Argon", "Claude", "Gemini Pro"],
+  "verified_available": ["gemini-4-argon-high", "claude-opus-5-5-high", "gemini-3.8-flash-high"],
+  "current_explicit_model": "gemini-3.8-flash-high",
+  "additional_fallback_authorization": "2026-10-20 사용자: flash high로 진행해",
+  "unavailable_requested_fallback": "Gemini Pro",
+  "unavailable_reason": "Installed agy models has no Gemini Pro identifier. Flash High was separately explicitly authorized; it is not represented as Gemini Pro.",
+  "switch_only_on": "explicit model usage/quota exhaustion or explicit user model selection",
+  "preserve_partial_changes_and_evidence": true,
+  "change_active_sessions": false
+}

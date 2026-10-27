@@ -9,7 +9,10 @@ command=a.command[1:]if a.command[:1]==['--']else a.command
 assert command
 if command[0]=='npm':command=['cmd.exe','/d','/c',shutil.which('npm.cmd')or'npm.cmd',*command[1:]]
 folder=ROOT/'artifacts/commands';folder.mkdir(parents=True,exist_ok=True);stem=folder/a.name;assert not stem.with_suffix('.json').exists(),'Use a new evidence name, never overwrite a prior result'
-env=os.environ.copy();env['CARGO_TARGET_DIR']=str(ROOT/'.harness/targets'/a.name);started=datetime.datetime.now().astimezone().isoformat();begin=time.monotonic();proc=subprocess.Popen(command,cwd=a.cwd,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+env=os.environ.copy();env['CARGO_TARGET_DIR']=str(ROOT/'.harness/targets'/a.name)
+scratch=pathlib.Path('C:/Users/HODI/AppData/Local/hermes/cache/scratch')/('npi-evidence-'+a.name);scratch.mkdir(parents=True,exist_ok=True)
+env.update(TMP=str(scratch),TEMP=str(scratch),TMPDIR=str(scratch))
+started=datetime.datetime.now().astimezone().isoformat();begin=time.monotonic();proc=subprocess.Popen(command,cwd=a.cwd,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
 partial=False
 try:stdout,stderr=proc.communicate(timeout=a.timeout)
 except subprocess.TimeoutExpired:
