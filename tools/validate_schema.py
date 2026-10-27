@@ -35,13 +35,33 @@ RFC3339_RE = re.compile(
     r"^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})$"
 )
 DOMAIN_LABEL_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
-NEGATION_TOKENS: tuple[str, ...] = ("불가", "없음", "미확인", "아님", "금지", "않음", "못함", "수 없")
-SYN_RST_CLAIM_RE = re.compile(r"(?:SYN\s*송신|RST\s*수신).*?(?:확인|관찰|단정)")
-FIREWALL_CLAIM_RE = re.compile(r"방화벽.*차단.*확정")
+SYN_RST_CLAIM_RE = re.compile(r"(?:SYN\s*송신|RST\s*수신)[^.,;\n]*?(?P<pred>확인|관찰|단정)")
+FIREWALL_CLAIM_RE = re.compile(r"방화벽[^.,;\n]*?차단[^.,;\n]*?(?P<pred>확정|단정)")
 HOP_CLAIM_RE = re.compile(
     r"(?:마지막\s*응답\s*(?:hop|홉)|last\s*hop)\s*(?:=|\s*은|\s*는|\s*을|\s*를)?\s*차단\s*장비",
     re.IGNORECASE,
 )
+IMMEDIATE_NEGATION_TAIL_RE = re.compile(
+    r"^\s*(?:"
+    r"(?:할|될|볼)\s*수\s*없|"
+    r"(?:으로|로)?\s*(?:단정|확정|확인|관찰|판단|간주|볼)\s*(?:할\s*수\s*없|수\s*없|(?:하|되)?지\s*(?:않|못)|하기\s*어렵|불가|금지|아님|아니)|"
+    r"(?:하|되)?지\s*(?:않|못)|"
+    r"하기\s*어렵|"
+    r"(?:이|가|은|는)?\s*(?:불가|아님|아니|금지|없음|없다|없습)"
+    r")"
+)
+
+
+def _has_affirmative_claim(stmt: str, pattern: re.Pattern[str]) -> bool:
+    """자유 텍스트 내 금지 구문 매칭별 직전(미-)·직후 서술어 부정 유무를 검사한다(증거 진위 완전 검증 아님)."""
+    for m in pattern.finditer(stmt):
+        pred_start = m.start("pred") if "pred" in pattern.groupindex else -1
+        if pred_start > 0 and stmt[pred_start - 1] == "미":
+            continue
+        if IMMEDIATE_NEGATION_TAIL_RE.match(stmt[m.end() :]):
+            continue
+        return True
+    return False
 
 
 def _parse_rfc3339_aware(value: Any) -> datetime | None:
@@ -237,14 +257,22 @@ def _validate_session_semantic(session: Any, contract_features: dict[str, dict[s
                 evidence_by_id[ev_id] = ev
 
     fr_by_id: dict[str, dict[str, Any]] = {}
+    seen_fids: set[str] = set()
     for i, fr in enumerate(session.get("feature_results") if isinstance(session.get("feature_results"), list) else []):
         if not isinstance(fr, dict):
             continue
         fid, gid = fr.get("feature_id"), fr.get("group_id")
-        if isinstance(fid, str) and fid in contract_features:
-            fr_by_id[fid] = fr
-            if gid != contract_features[fid]["group_id"]:
-                errors.append(f"$.feature_results[{i}]: {fid!r}의 group_id 매핑 불일치({gid!r}).")
+        if isinstance(fid, str) and fid:
+            if fid in seen_fids:
+                errors.append(f"$.feature_results[{i}].feature_id: 중복(duplicate)된 feature_id입니다: {fid!r}")
+            else:
+                seen_fids.add(fid)
+                if fid in contract_features:
+                    fr_by_id[fid] = fr
+                else:
+                    errors.append(f"$.feature_results[{i}].feature_id: 알 수 없는 feature_id입니다: {fid!r}")
+        if isinstance(fid, str) and fid in contract_features and gid != contract_features[fid]["group_id"]:
+            errors.append(f"$.feature_results[{i}]: {fid!r}의 group_id 매핑 불일치({gid!r}).")
         ev_ids = fr.get("evidence_ids") if isinstance(fr.get("evidence_ids"), list) else []
         for eid in ev_ids:
             if not isinstance(eid, str) or eid not in evidence_by_id:
@@ -263,12 +291,12 @@ def _validate_session_semantic(session: Any, contract_features: dict[str, dict[s
         if fd.get("classification") == "OBSERVED" and not ev_ids:
             errors.append(f"$.findings[{i}]: OBSERVED 분류에는 비어 있지 않은 evidence_ids가 필요합니다.")
         stmt = fd.get("statement")
-        if isinstance(stmt, str) and not any(neg in stmt for neg in NEGATION_TOKENS):
-            if SYN_RST_CLAIM_RE.search(stmt) and not any(e.get("kind") == "PACKET" for e in resolved):
+        if isinstance(stmt, str):
+            if _has_affirmative_claim(stmt, SYN_RST_CLAIM_RE) and not any(e.get("kind") == "PACKET" for e in resolved):
                 errors.append(f"$.findings[{i}].statement: SYN/RST 확인 단정에는 PACKET 증거가 필수입니다.")
-            if FIREWALL_CLAIM_RE.search(stmt):
+            if _has_affirmative_claim(stmt, FIREWALL_CLAIM_RE):
                 errors.append(f"$.findings[{i}].statement: '방화벽 차단 확정' 단정은 허용되지 않습니다.")
-            if HOP_CLAIM_RE.search(stmt):
+            if _has_affirmative_claim(stmt, HOP_CLAIM_RE):
                 errors.append(f"$.findings[{i}].statement: '마지막 응답 HOP=차단 장비' 단정은 허용되지 않습니다.")
 
     packet_evs = [
@@ -276,7 +304,8 @@ def _validate_session_semantic(session: Any, contract_features: dict[str, dict[s
         if e.get("kind") == "PACKET" or str(e.get("artifact_path") or "").lower().endswith((".pcap", ".pcapng"))
     ]
     cap_ok = isinstance(profile, dict) and profile.get("capture_approved") is True
-    sel_set = set(profile.get("selected_features", [])) if isinstance(profile, dict) and isinstance(profile.get("selected_features"), list) else set()
+    raw_sel = profile.get("selected_features") if isinstance(profile, dict) else None
+    sel_set = {f for f in raw_sel if isinstance(f, str)} if isinstance(raw_sel, list) else set()
     pkt_fr, imp_fr, exp_fr = fr_by_id.get("packet_capture"), fr_by_id.get("import_bundle"), fr_by_id.get("pcap_export")
     imp_ok = "import_bundle" in sel_set or (isinstance(imp_fr, dict) and imp_fr.get("status") == "PASS")
     cap_absent = (
@@ -293,11 +322,12 @@ def _validate_session_semantic(session: Any, contract_features: dict[str, dict[s
 
 
 def _validate_registry_semantic(registry: Any, contract_features: dict[str, dict[str, Any]]) -> list[str]:
-    """레지스트리 23개 고유 기능, 고정 그룹/요구사항/의존성 및 의존성 그래프(누락·순환)를 검증한다."""
+    """레지스트리 23개 고유 기능, 고정 그룹, 알려진 요구사항 및 의존성 DAG(누락·중복·순환)를 검증한다."""
     if not isinstance(registry, list):
         return ["$: 레지스트리 문서는 배열(array)이어야 합니다."]
     errors: list[str] = []
     seen: dict[str, dict[str, Any]] = {}
+    known_reqs = {r for f in contract_features.values() for r in f.get("requirements", []) if isinstance(r, str)}
     for i, entry in enumerate(registry):
         if not isinstance(entry, dict):
             errors.append(f"$[{i}]: 항목은 객체여야 합니다.")
@@ -314,9 +344,15 @@ def _validate_registry_semantic(registry: Any, contract_features: dict[str, dict
             errors.append(f"$[{i}].feature_id: 계약에 없는 알 수 없는 feature_id입니다: {fid!r}")
             continue
         exp = contract_features[fid]
-        for field in ("group_id", "requirements", "dependencies"):
-            if entry.get(field) != exp[field]:
-                errors.append(f"$[{i}].{field}: {fid!r}의 {field}가 계약 고정값과 불일치합니다.")
+        if entry.get("group_id") != exp["group_id"]:
+            errors.append(f"$[{i}].group_id: {fid!r}의 group_id가 계약 고정값과 불일치합니다.")
+        reqs = entry.get("requirements")
+        if (
+            not isinstance(reqs, list)
+            or len(reqs) != len({r for r in reqs if isinstance(r, str)})
+            or any(not isinstance(r, str) or r not in known_reqs for r in reqs)
+        ):
+            errors.append(f"$[{i}].requirements: {fid!r}의 requirements가 유효하지 않습니다.")
 
     missing_ids = set(contract_features) - set(seen)
     if missing_ids or len(registry) != len(contract_features):
@@ -326,10 +362,14 @@ def _validate_registry_semantic(registry: Any, contract_features: dict[str, dict
     for fid, entry in seen.items():
         deps = entry.get("dependencies") if isinstance(entry.get("dependencies"), list) else []
         valid_deps: list[str] = []
+        seen_deps: set[str] = set()
         for dep in deps:
             if not isinstance(dep, str) or dep not in seen or dep not in contract_features:
                 errors.append(f"$[{fid}].dependencies: 존재하지 않는 의존성(missing dependency) 노드: {dep!r}")
+            elif dep in seen_deps:
+                errors.append(f"$[{fid}].dependencies: 중복(duplicate)된 의존성 노드: {dep!r}")
             else:
+                seen_deps.add(dep)
                 valid_deps.append(dep)
         dep_graph[fid] = valid_deps
 

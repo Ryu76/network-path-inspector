@@ -145,6 +145,7 @@
       "enum": [
         "CONNECTED",
         "REFUSED",
+        "RESET",
         "TIMED_OUT",
         "UNREACHABLE",
         "LOCAL_ERROR",
