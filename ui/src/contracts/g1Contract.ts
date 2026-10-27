@@ -82,6 +82,7 @@ export type ConfidenceLevel = 'low' | 'medium' | 'high';
 export type TcpOutcome =
   | 'CONNECTED'
   | 'REFUSED'
+  | 'RESET'
   | 'TIMED_OUT'
   | 'UNREACHABLE'
   | 'LOCAL_ERROR'
